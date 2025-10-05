@@ -265,6 +265,15 @@
         .character-token.enemy-token {
             border-color: #ef4444;
         }
+          .status-effect-icon {
+            position: absolute;
+            top: -5px; /* 토큰보다 살짝 위로 */
+            right: -5px;
+            font-size: 1.5rem; /* 아이콘 크기 */
+            z-index: 25; /* 토큰 이미지(20)보다 위에 표시 */
+            pointer-events: none; /* 아이콘이 클릭을 방해하지 않도록 설정 */
+            filter: drop-shadow(0 0 3px rgba(0, 0, 0, 1)); /* 아이콘이 잘 보이도록 그림자 추가 */
+        }
 
         /* Damage Effect */
         .character-token.show-hit-overlay::after {
@@ -394,10 +403,16 @@
         }
         .character-token:hover {
             transform: scale(1.1);
+        }  #game-board.targeting-active .character-token:hover {
+            transform: none; /* 크기 변경 효과(scale)를 없앱니다. */
         }
         .selected-character {
              box-shadow: 0 0 15px 3px var(--accent-primary);
              border-color: var(--accent-primary) !important;
+        }
+        .token-click-through {
+            opacity: 0.7; /* [추가] 피드백을 위해 살짝 반투명하게 만듭니다. */
+            pointer-events: none; /* 이 요소에 대한 마우스 이벤트를 무시하고, 아래에 있는 요소(셀)가 클릭되도록 합니다. */
         }
         
         .form-input {
@@ -792,7 +807,7 @@
         /* Class to trigger the animation */
         #turn-announcement.animate-turn {
             display: block;
-            animation: turn-announce-animation 4s ease-in-out forwards;
+            animation: turn-announce-animation 2.5s ease-in-out forwards;
         }
  /* --- 이동 취소 & 턴 종료 버튼 스타일 --- */
 
@@ -1124,6 +1139,20 @@
         'slash': { id: 'slash', name: '베기', type: 'Melee', range: 1, rangeShape: 'diamond', multiplier: 1.5, icon: '⚔️', mpCost: 5, category: 'Attack' },
         'stomp': { id: 'stomp', name: '발 구르기', type: 'Melee', range: 1, rangeShape: 'square', multiplier: 1.2, icon: '💥', mpCost: 8, category: 'Attack'},
         'crosscut': { id: 'crosscut', name: '십자 베기', type: 'Melee', range: 2, rangeShape: 'cross', multiplier: 1.0, icon: '十字', mpCost: 10, category: 'Attack'},
+        'binding_chains': { id: 'binding_chains', name: '속박의 사슬', type: 'Melee', range: 1, rangeShape: 'square', multiplier: 1.0, icon: '🔗', mpCost: 20, category: 'Attack', appliesEffect: { id: 'rooted', name: '속박', turns: 2 }},
+        'poison': { 
+            id: 'poison', 
+            name: '중독', 
+            type: 'Melee', 
+            range: 1, 
+            rangeShape: 'diamond', 
+            multiplier: 0.5, // 초기 피해는 약하게 설정
+            icon: '☠️', 
+            mpCost: 15, 
+            category: 'Attack',
+            // 3턴 동안 턴마다 10의 피해를 주는 효과
+            appliesEffect: { id: 'poisoned', name: '중독', turns: 3, value: 10 } 
+        },
         'shoot': { id: 'shoot', name: '사격', type: 'Ranged', range: 4, rangeShape: 'diamond', multiplier: 1.0, icon: '🏹', mpCost: 5, category: 'Attack' },
         'fireball': { id: 'fireball', name: '화염구', type: 'Ranged', range: 3, rangeShape: 'square', multiplier: 1.0, icon: '🔥', isAoe: true, aoeRange: 1, aoeShape: 'square', mpCost: 15, category: 'Attack' },
         'heal': { id: 'heal', name: '치유의 빛', type: 'Heal', range: 2, rangeShape: 'diamond', multiplier: 1.0, icon: '✨', targetType: 'ALLY', mpCost: 10, category: 'Support' },
@@ -1244,17 +1273,29 @@
         if (snapshot.empty) {
             const batch = writeBatch(db);
             const pcData = [ 
-                { name: "User1", img: "", type: 'PC', size: 1, skills: ['slash', 'shoot', 'heal', 'hp_transfer'], order: 1 }, // Added hp_transfer
-                { name: "User2", img: "", type: 'PC', size: 1, skills: ['crosscut', 'resurrect', 'mp_transfer'], order: 3 }, // Added resurrect, mp_transfer
+                { name: "User1", img: "", type: 'PC', size: 1, skills: ['slash', 'shoot', 'heal', 'hp_transfer'], statusEffects: [
+        // { id: 'defenseUp', name: '결계 강화', turnsRemaining: 2, value: 1.5 },
+        // { id: 'rooted', name: '속박의 사슬', turnsRemaining: 1 }
+    ], order: 1 }, // Added hp_transfer
+                { name: "User2", img: "", type: 'PC', size: 1, skills: ['crosscut', 'resurrect', 'mp_transfer'], statusEffects: [
+        // { id: 'defenseUp', name: '결계 강화', turnsRemaining: 2, value: 1.5 },
+        // { id: 'rooted', name: '속박의 사슬', turnsRemaining: 1 }
+    ], order: 3 }, // Added resurrect, mp_transfer
             ];
             const enemyData = [ 
-                { name: "Enemy1", img: "", type: 'ENEMY', size: 1, skills: ['slash'], order: 2 }, 
-                { name: "Enemy2", img: "", type: 'ENEMY', size: 2, skills: ['stomp'], order: 4 }, 
+                { name: "Enemy1", img: "", type: 'ENEMY', size: 1, skills: ['slash'], statusEffects: [
+        // { id: 'defenseUp', name: '결계 강화', turnsRemaining: 2, value: 1.5 },
+        // { id: 'rooted', name: '속박의 사슬', turnsRemaining: 1 }
+    ], order: 2 }, 
+                { name: "Enemy2", img: "", type: 'ENEMY', size: 2, skills: ['stomp'], statusEffects: [
+        // { id: 'defenseUp', name: '결계 강화', turnsRemaining: 2, value: 1.5 },
+        // { id: 'rooted', name: '속박의 사슬', turnsRemaining: 1 }
+    ], order: 4 }, 
             ];
             [...pcData, ...enemyData].forEach(char => {
                 const charPassword = char.type === 'PC' ? DEFAULT_PC_PASSWORD : ''; 
                 // ADDED MP stats
-                const newChar = { name: char.name, imageUrl: char.img || '', type: char.type, size: char.size, hp: 100, maxHp: 100, mp: 50, maxMp: 50, minAttack: 12, maxAttack: 18, minDefense: 3, maxDefense: 7, x: null, y: null, skills: char.skills || [], turnOrder: char.order, password: charPassword, isAuto: false };
+                const newChar = { name: char.name, imageUrl: char.img || '', type: char.type, size: char.size, hp: 100, maxHp: 100, mp: 50, maxMp: 50, minAttack: 12, maxAttack: 18, minDefense: 3, maxDefense: 7, x: null, y: null, skills: char.skills || [], turnOrder: char.order, password: charPassword, isAuto: false, statusEffects: [] };
                 batch.set(doc(charCollectionRef), newChar);
             });
             await batch.commit();
@@ -1333,36 +1374,37 @@
    // --- Game Logic ---
     async function logAction(message, type = "system") { if (gameId) await addDoc(collection(db, "games", gameId, "logs"), { message, type, timestamp: serverTimestamp() }); }
     
-// NEW & IMPROVED: Function to show the turn announcement banner
-    // NEW & IMPROVED: Function to show the turn announcement banner
-    function showTurnAnnouncement(characterName, round) {
+    // =================================================================
+    // 👇 [새로 추가] 어떤 텍스트든 표시할 수 있는 범용 배너 함수
+    // =================================================================
+    function showBannerAnnouncement(line1, line2, size1 = '1.5rem', size2 = '3.5rem') {
         const announcementEl = document.getElementById('turn-announcement');
-        const backdropEl = document.getElementById('turn-announcement-backdrop'); // 백드롭 요소 가져오기
+        const backdropEl = document.getElementById('turn-announcement-backdrop');
         if (!announcementEl || !backdropEl) return;
 
-        // 알림 내용 설정 (두 줄 형식으로 변경)
         announcementEl.innerHTML = `
-            <span class="round-text">Round ${round}</span>
-            <span class="turn-text">${characterName}의 턴입니다</span>
+            <span class="round-text" style="font-size: ${size1};">${line1}</span>
+            <span class="turn-text" style="font-size: ${size2};">${line2}</span>
         `;
 
-        // 애니메이션 재시작을 위해 기존 클래스 제거
         announcementEl.classList.remove('animate-turn');
         backdropEl.classList.remove('visible');
-
-        // 브라우저가 변경사항을 인지하도록 강제 리플로우(reflow) 실행
-        void announcementEl.offsetWidth;
-
-        // 애니메이션 및 백드롭 표시 클래스를 다시 추가하여 실행
+        void announcementEl.offsetWidth; // Reflow
         announcementEl.classList.add('animate-turn');
-        backdropEl.classList.add('visible'); // 백드롭 보이기
+        backdropEl.classList.add('visible');
 
-        // 애니메이션이 끝나면 클래스를 제거하여 초기 상태로 되돌림
         announcementEl.addEventListener('animationend', () => {
             announcementEl.classList.remove('animate-turn');
-            backdropEl.classList.remove('visible'); // 백드롭 숨기기
+            backdropEl.classList.remove('visible');
         }, { once: true });
     }
+
+    // --- 기존 showTurnAnnouncement 함수는 이렇게 수정됩니다 ---
+    function showTurnAnnouncement(characterName, round) {
+        showBannerAnnouncement(`Round ${round}`, `${characterName}의 턴입니다`);
+    }
+
+    
     // NEW: Function to check for damage tile and apply damage if necessary
     async function checkAndApplyTileDamage(char) {
         if (char.x === null || char.hp <= 0) return;
@@ -1513,48 +1555,79 @@
         }, moved ? 1500 : 500); // 이동했으면 1.5초, 아니면 0.5초 대기
     }
     async function updateTurnIndex(newIndex, reverse = false) {
-        if (characters.length === 0 || !gameId) return;
-        
-        let newRound = round;
-        if (!reverse && newIndex < currentTurnIndex) {
-            newRound++;
-            await logAction(`▶️ 라운드 ${newRound} 시작`, "system");
-        } else if (reverse && newIndex > currentTurnIndex) {
-            if (newRound > 1) {
-                newRound--;
-                await logAction(`◀️ 이전 라운드로 돌아갑니다. (라운드 ${newRound})`, "system");
-            }
-        }
-        
-        currentTurnIndex = newIndex % characters.length;
-        const currentTurnChar = characters[currentTurnIndex];
-        const currentTurnCharId = currentTurnChar?.id || null;
-
-
-        if (maxRounds > 0 && newRound > maxRounds) {
-            await setDoc(doc(db, 'games', gameId), { gameState: 'ENDED', round: newRound, currentTurnIndex, currentTurnCharId }, { merge: true });
-            showCustomModal("전투 종료", `최대 라운드(${maxRounds})에 도달하여 전투가 종료되었습니다.`, [{text: "확인", class:"bg-green-600"}]);
-            await logAction(`- 전투 종료: 최대 라운드 도달 -`, "system");
-        } else {
-            await setDoc(doc(db, 'games', gameId), { round: newRound, currentTurnIndex, currentTurnCharId }, { merge: true });
-            
-            if (gameState === 'STARTED' && currentTurnChar) {
-                // 1. MP Regeneration
-                if (!reverse) {
-                    const newMp = Math.min(currentTurnChar.maxMp, currentTurnChar.mp + MP_REGEN_PER_TURN);
-                    if (newMp > currentTurnChar.mp) {
-                        await updateDoc(doc(db, 'games', gameId, 'characters', currentTurnChar.id), { mp: newMp });
-                        await logAction(`💧 ${currentTurnChar.name}이(가) **${MP_REGEN_PER_TURN} MP**를 회복했습니다.`, "system");
-                    }
-                }
-                
-                // 2. Tile Damage Check
-                if (!reverse) {
-                    await checkAndApplyTileDamage(currentTurnChar);
-                }
-            }
+    if (characters.length === 0 || !gameId) return;
+    
+    let newRound = round;
+    if (!reverse && newIndex < currentTurnIndex) {
+        newRound++;
+        await logAction(`▶️ 라운드 ${newRound} 시작`, "system");
+    } else if (reverse && newIndex > currentTurnIndex) {
+        if (newRound > 1) {
+            newRound--;
+            await logAction(`◀️ 이전 라운드로 돌아갑니다. (라운드 ${newRound})`, "system");
         }
     }
+    
+    currentTurnIndex = newIndex % characters.length;
+    const currentTurnChar = characters[currentTurnIndex];
+    const currentTurnCharId = currentTurnChar?.id || null;
+
+    if (maxRounds > 0 && newRound > maxRounds) {
+        await logAction(`- 전투 종료: 최대 라운드 도달 -`, "system");
+        await showGameSummaryModal("시간 종료", `최대 라운드(${maxRounds})에 도달하여 전투가 종료되었습니다.`);
+        return;
+    } 
+    
+    await setDoc(doc(db, 'games', gameId), { round: newRound, currentTurnIndex, currentTurnCharId }, { merge: true });
+    
+    if (gameState === 'STARTED' && currentTurnChar && !reverse) {
+
+        const effects = currentTurnChar.statusEffects || [];
+        if (effects.length > 0) {
+            
+            for (const effect of effects) {
+                if (effect.id === 'poisoned') { // 맹독 효과
+                    const damage = effect.value || 10;
+                    const newHp = await updateHP(currentTurnChar, -damage, "damage");
+                    await logAction(`☠️ ${currentTurnChar.name}이(가) [${effect.name}] 효과로 **${damage}의 피해**를 입었습니다! (HP: ${newHp})`, "damage");
+                }
+                /* 👇 [수정된 부분] 빠져있던 재생 효과 처리 로직을 추가합니다. */
+                if (effect.id === 'regenerating') { // 재생 효과
+                    const heal = effect.value || 15;
+                    const newHp = await updateHP(currentTurnChar, heal, "heal");
+                    await logAction(`🌿 ${currentTurnChar.name}이(가) [${effect.name}] 효과로 **${heal}의 HP**를 회복했습니다! (HP: ${newHp})`, "heal");
+                }
+            }
+
+            const isGameOver = await checkGameEndCondition();
+            if (isGameOver) return;
+            
+            const updatedEffects = effects
+                .map(effect => ({ ...effect, turnsRemaining: effect.turnsRemaining - 1 }))
+                .filter(effect => {
+                    if (effect.turnsRemaining <= 0) {
+                        logAction(`⏱️ ${currentTurnChar.name}의 [${effect.name}] 효과가 사라졌습니다.`, "system");
+                        return false;
+                    }
+                    return true;
+                });
+
+            await updateDoc(doc(db, 'games', gameId, 'characters', currentTurnChar.id), {
+                statusEffects: updatedEffects
+            });
+        }
+            
+        // 1. MP Regeneration
+        const newMp = Math.min(currentTurnChar.maxMp, currentTurnChar.mp + MP_REGEN_PER_TURN);
+        if (newMp > currentTurnChar.mp) {
+            await updateDoc(doc(db, 'games', gameId, 'characters', currentTurnChar.id), { mp: newMp });
+            await logAction(`💧 ${currentTurnChar.name}이(가) **${MP_REGEN_PER_TURN} MP**를 회복했습니다.`, "system");
+        }
+        
+        // 2. Tile Damage Check
+        await checkAndApplyTileDamage(currentTurnChar);
+    }
+}
 
     async function nextTurn() {
         if (characters.length === 0 || !gameId) return;
@@ -1672,7 +1745,22 @@
         }
 
         const currentAttack = Math.floor(Math.random() * (attacker.maxAttack - attacker.minAttack + 1)) + attacker.minAttack;
-        const currentDefense = Math.floor(Math.random() * (defender.maxDefense - defender.minDefense + 1)) + defender.minDefense;
+        let currentDefense = Math.floor(Math.random() * (defender.maxDefense - defender.minDefense + 1)) + defender.minDefense; // let으로 변경
+
+        if (defender.statusEffects && defender.statusEffects.length > 0) {
+            const defenseUpEffect = defender.statusEffects.find(e => e.id === 'defenseUp');
+            if (defenseUpEffect) {
+                currentDefense *= defenseUpEffect.value; // ex: 1.5배
+                logAction(`🛡️ ${defender.name}의 [${defenseUpEffect.name}] 효과! 방어력이 증가합니다.`, "system");
+            }
+
+            const defenseDownEffect = defender.statusEffects.find(e => e.id === 'defenseDown');
+            if (defenseDownEffect) {
+                currentDefense *= defenseDownEffect.value; // ex: 0.5배
+                logAction(`🛡️ ${defender.name}의 [${defenseDownEffect.name}] 효과! 방어력이 감소합니다.`, "system");
+            }
+        }
+
         const finalDamage = Math.max(1, Math.round((currentAttack * skill.multiplier) - currentDefense));
 
         const newHp = await updateHP(defender, -finalDamage, "damage");
@@ -1751,12 +1839,80 @@
         return true;
     }
 
+async function applyStatusEffect(target, effectInfo) {
+    if (!target || !effectInfo) return;
 
-    async function executeSkill(attacker, target, skillId) {
+    /* 👇 [수정된 부분] effectInfo에서 value와 effectType을 함께 가져옵니다. */
+    const newEffect = {
+        id: effectInfo.id,
+        name: effectInfo.name,
+        turnsRemaining: effectInfo.turns,
+        value: effectInfo.value || 0, // 턴당 값 (데미지 또는 힐량)
+        effectType: effectInfo.effectType // 'damage' 또는 'heal'
+    };
+
+    const targetRef = doc(db, 'games', gameId, 'characters', target.id);
+    
+    // Firestore에서 최신 데이터를 가져와서 처리하는 것이 안전합니다.
+    const targetDoc = await getDoc(targetRef);
+    if (!targetDoc.exists()) return;
+
+    const currentEffects = targetDoc.data().statusEffects || [];
+
+    // 이미 같은 효과에 걸려있는지 확인 (중복 방지)
+    if (currentEffects.some(e => e.id === newEffect.id)) {
+        // 원한다면 지속시간을 갱신하는 로직을 추가할 수도 있습니다.
+        console.log(`${target.name}은(는) 이미 ${newEffect.name} 효과를 받고 있습니다.`);
+        return;
+    }
+
+    const updatedEffects = [...currentEffects, newEffect];
+    await updateDoc(targetRef, { statusEffects: updatedEffects });
+
+    await logAction(`🔗 ${target.name}이(가) [${newEffect.name}] 효과를 받았습니다! (${newEffect.turnsRemaining}턴 지속)`, "system");
+    }async function showGameSummaryModal(title, message) {
+        // 게임 상태를 'ENDED'로 확실하게 변경합니다.
+        await setDoc(doc(db, 'games', gameId), { gameState: 'ENDED' }, { merge: true });
+
+        const remainingPCs = characters.filter(c => c.type === 'PC' && c.hp > 0 && c.x !== null).length;
+        const totalPCs = characters.filter(c => c.type === 'PC').length;
+        const remainingEnemies = characters.filter(c => c.type === 'ENEMY' && c.hp > 0 && c.x !== null).length;
+        const totalEnemies = characters.filter(c => c.type === 'ENEMY').length;
+
+        const resultMessage = `
+            ${message}
+            <hr class="my-4 border-gray-600">
+            <h4 class="font-bold text-lg mb-2">최종 결과</h4>
+            <p>남은 아군: ${remainingPCs} / ${totalPCs}</p>
+            <p>남은 적군: ${remainingEnemies} / ${totalEnemies}</p>
+        `;
+
+        showCustomModal(title, resultMessage, [{ text: "확인", class: "bg-indigo-600" }]);
+    }
+        async function checkGameEndCondition() {
+        const remainingPCs = characters.filter(c => c.type === 'PC' && c.hp > 0 && c.x !== null).length;
+        const remainingEnemies = characters.filter(c => c.type === 'ENEMY' && c.hp > 0 && c.x !== null).length;
+
+        // 아군이 모두 쓰러졌을 경우
+        if (remainingPCs === 0) {
+            await showGameSummaryModal("패배...", "모든 아군이 쓰러졌습니다.");
+            return true; // 게임 종료됨
+        } 
+        // 적군이 모두 쓰러졌을 경우
+        else if (remainingEnemies === 0) {
+            await showGameSummaryModal("승리!", "모든 적을 물리쳤습니다.");
+            return true; // 게임 종료됨
+        }
+
+        return false; // 게임 계속됨
+    }
+     async function executeSkill(attacker, target, skillId) {
         const skill = SKILLS[skillId];
         if (!skill) return;
         
         let actionSucceeded = false;
+        // 임시 변수로 여러 대상들을 저장할 배열
+        let affectedTargets = []; 
 
         if (skill.type === 'Heal' || skill.type === 'Support') {
             if (skill.isAoe) {
@@ -1779,18 +1935,34 @@
                     await logAction(`🔥 ${attacker.name}이(가) ${skill.name}(으)로 광역 공격!`, "damage");
                     const results = await Promise.all(targets.map(t => applyDamage(attacker, t, skillId)));
                     actionSucceeded = results.some(r => r);
+                    if (actionSucceeded) affectedTargets = targets; // 성공 시 대상들을 저장
                 } else {
                     await logAction(`🔥 ${attacker.name}의 ${skill.name}! 하지만 아무도 맞지 않았습니다.`, "system");
                 }
             } else {
                 actionSucceeded = await applyDamage(attacker, target, skillId);
+                if (actionSucceeded) affectedTargets.push(target); // 성공 시 대상 저장
+            }
+        }
+        
+        // 👇 [핵심 추가 부분]
+        // 스킬이 성공했고, 적용할 효과(appliesEffect)가 정의되어 있다면
+        if (actionSucceeded && skill.appliesEffect) {
+            // 영향을 받은 모든 대상에게 효과를 적용합니다.
+            for (const t of affectedTargets) {
+                // 새로 만든 함수를 여기서 호출!
+                await applyStatusEffect(t, skill.appliesEffect);
             }
         }
         
         if (actionSucceeded) {
-            await nextTurn();
+            // 👇 [수정] 바로 nextTurn()을 호출하기 전에 게임 종료 여부를 확인합니다.
+            const isGameOver = await checkGameEndCondition();
+            if (!isGameOver) {
+                await nextTurn();
+            }
         } else {
-            render(); // Re-render to show current state/error messages if action failed
+            render(); 
         }
     }
 
@@ -1922,90 +2094,73 @@
         isBoardInitialized = true;
     }
 
-    function highlightRange(char, skillId) {
-        // IMPORTANT: Clear previous highlights immediately before calculating new ones
+     function highlightRange(char, skillId) {
         document.querySelectorAll('.combat-range').forEach(cell => cell.classList.remove('combat-range', 'attack-range-move', 'attack-range-skill', 'heal-range-skill'));
         
         if (!char || char.x === null || !SKILLS[skillId]) return;
 
         const skill = SKILLS[skillId];
-        // If it's the default 'move' skill, use the character's custom moveRange if available
         const range = (skill.id === 'move' && char.moveRange !== undefined) ? char.moveRange : skill.range;
         const size = char.size || 1;
         
-        const isMove = skill.category === 'Utility'; // Check category for utility skills
+        const isMove = skill.id === 'move';
         const isAttack = skill.category === 'Attack';
         const isHealOrSupport = skill.category === 'Heal' || skill.category === 'Support';
         
         const shape = skill.rangeShape || 'diamond';
         const validCells = new Set();
-        const invalidMoveCells = new Set(); // Cells occupied or blocked by obstacle
 
         if (isMove) {
-            // Movement range
-            const originX = char.x, originY = char.y;
-            for (let dy = -range; dy <= range; dy++) for (let dx = -range; dx <= range; dx++) {
-                if (Math.abs(dx) + Math.abs(dy) <= range) {
-                    const targetX = originX + dx, targetY = originY + dy;
-                    const cellKey = `${targetX},${targetY}`;
+            const originX = char.x;
+            const originY = char.y;
+            for (let dy = -range; dy <= range; dy++) {
+                for (let dx = -range; dx <= range; dx++) {
+                    if (Math.abs(dx) + Math.abs(dy) <= range) {
+                        const targetX = originX + dx;
+                        const targetY = originY + dy;
 
-                    if (targetX >= 0 && targetX < BOARD_SIZE && targetY >= 0 && targetY < BOARD_SIZE) {
-                        // Check if the current move target cell(s) is clear
-                        let isClear = true;
-                        for (let cx = targetX; cx < targetX + size; cx++) {
-                            for (let cy = targetY; cy < targetY + size; cy++) {
-                                if (cx >= char.x && cx < char.x + size && cy >= char.y && cy < char.y + size) {
-                                    continue; 
-                                }
-                                
-                                if (isCellOccupied(cx, cy, char.id)) {
-                                    isClear = false;
-                                    break;
-                                }
-                            }
-                            if (!isClear) break;
-                        }
-
-                        if (isClear) {
-                            validCells.add(cellKey);
-                        } else {
-                            invalidMoveCells.add(cellKey);
+                        if (canPlaceCharacter(char, targetX, targetY)) {
+                            validCells.add(`${targetX},${targetY}`);
                         }
                     }
                 }
             }
-            // Add the character's current position to the valid moveset (for zero-move click)
-            for (let ex = 0; ex < size; ex++) for (let ey = 0; ey < size; ey++) {
-                validCells.add(`${char.x + ex},${char.y + ey}`);
-            }
-        } else if (isAttack || isHealOrSupport) {
-             // Action range
-            for (let ex = 0; ex < size; ex++) for (let ey = 0; ey < size; ey++) {
-                const originX = char.x + ex, originY = char.y + ey;
-                for (let dy = -range; dy <= range; dy++) for (let dx = -range; dx <= range; dx++) {
-                    
-                    // --- 💡 여기가 핵심 수정 부분입니다 💡 ---
-                    let inShape = (shape === 'diamond' && Math.abs(dx) + Math.abs(dy) <= range) ||
-                                  (shape === 'square' && Math.abs(dx) <= range && Math.abs(dy) <= range) ||
-                                  // '십자' 모양일 때, 가로/세로축에 있으면서 'range' 이내인 조건 추가
-                                  (shape === 'cross' && ((dx === 0 && Math.abs(dy) <= range) || (dy === 0 && Math.abs(dx) <= range)));
-                    // --- 수정 끝 ---
+            
 
-                    if (inShape) {
-                        const targetX = originX + dx, targetY = originY + dy;
-                        if (targetX >= 0 && targetX < BOARD_SIZE && targetY >= 0 && targetY < BOARD_SIZE) validCells.add(`${targetX},${targetY}`);
+        } else if (isAttack || isHealOrSupport) {
+             // Action range (기존 로직과 동일)
+            for (let ex = 0; ex < size; ex++) {
+                for (let ey = 0; ey < size; ey++) {
+                    const originX = char.x + ex, originY = char.y + ey;
+                    for (let dy = -range; dy <= range; dy++) {
+                        for (let dx = -range; dx <= range; dx++) {
+                            let inShape = (shape === 'diamond' && Math.abs(dx) + Math.abs(dy) <= range) ||
+                                          (shape === 'square' && Math.abs(dx) <= range && Math.abs(dy) <= range) ||
+                                          (shape === 'cross' && ((dx === 0 && Math.abs(dy) <= range) || (dy === 0 && Math.abs(dx) <= range)));
+                            if (inShape) {
+                                const targetX = originX + dx, targetY = originY + dy;
+                                if (targetX >= 0 && targetX < BOARD_SIZE && targetY >= 0 && targetY < BOARD_SIZE) {
+                                    validCells.add(`${targetX},${targetY}`);
+                                }
+                            }
+                        }
                     }
                 }
             }
             if (!skill.isAoe) {
-                for (let ex = 0; ex < size; ex++) for (let ey = 0; ey < size; ey++) validCells.delete(`${char.x + ex},${char.y + ey}`);
+                for (let ex = 0; ex < size; ex++) {
+                    for (let ey = 0; ey < size; ey++) {
+                        validCells.delete(`${char.x + ex},${char.y + ey}`);
+                    }
+                }
             }
         }
 
         const className = isMove ? 'attack-range-move' : (isHealOrSupport ? 'heal-range-skill' : 'attack-range-skill');
         validCells.forEach(coord => {
             const [x, y] = coord.split(',');
-            document.querySelector(`.cell[data-x='${x}'][data-y='${y}']`)?.classList.add('combat-range', className);
+            const cell = document.querySelector(`.cell[data-x='${x}'][data-y='${y}']`);
+            if (cell) cell.classList.add('combat-range', className);
         });
     }
     
@@ -2082,54 +2237,43 @@
 
         let html = `<h3 class="text-lg font-bold mb-2 ${selectedChar.type === 'ENEMY' ? 'text-red-400' : 'text-green-400'}">${selectedChar.name} 행동</h3>`;
 
-        // Display current MP
         html += `<p class="text-sm font-semibold text-blue-400 mb-3">MP: ${selectedChar.mp}/${selectedChar.maxMp}</p>`;
 
         if (isTurnCharacter) {
+            const isRooted = selectedChar.statusEffects && selectedChar.statusEffects.some(e => e.id === 'rooted');
+            
+            if (isRooted && turnPhase === 'MOVE') {
+                logAction(`🔗 ${selectedChar.name}이(가) [속박] 상태라 이동할 수 없습니다. 바로 행동 단계로 넘어갑니다.`, "system");
+                turnPhase = 'ACTION'; 
+                selectedSkill = null; 
+                preMovePosition = { x: selectedChar.x, y: selectedChar.y };
+            }
+
             if (turnPhase === 'MOVE') {
                 html += `<p class="text-sm text-gray-400">이동할 위치를 선택하거나, 캐릭터 위의 '▼'를 클릭하여 이동을 건너뛰세요.</p>`;
-            } else { 
+            } else { // 'ACTION' 단계일 때
                 html += `<div class="flex flex-wrap gap-2">`;
                 
-                // Separate skills by category for display
+                // ... (기존 스킬 버튼 생성 로직은 동일)
                 const categorizedSkills = { Attack: [], Support: [], Heal: [], Utility: [] };
                 selectedChar.skills.forEach(id => {
                     const skill = SKILLS[id];
                     if (skill && skill.category) {
-                        if (categorizedSkills[skill.category]) {
-                            categorizedSkills[skill.category].push(skill);
-                        }
+                        if (categorizedSkills[skill.category]) categorizedSkills[skill.category].push(skill);
                     }
                 });
-
-                // Render Action Skills first (Attack, Heal, Support)
                 ['Attack', 'Heal', 'Support', 'Utility'].forEach(category => {
                     if (categorizedSkills[category].length > 0) {
-                        // Add a separator for better visual grouping (optional)
-                        // if (category !== 'Attack' && category !== 'Utility') { html += `<hr class="w-full my-1 border-gray-700/50">`; }
-
                         categorizedSkills[category].forEach(skill => {
-                            const isMoveSkill = skill.id === 'move' && skill.category === 'Utility';
-                            
-                            // Only show Utility skills (like Fast Move, or specific ranged movement) in ACTION phase if explicitly added by user, and not the default 'move' skill which is handled by the board highlight during MOVE phase.
-                            // If we are in the ACTION phase, we allow utility spells, including specific move options.
-                            if (isMoveSkill && category === 'Utility' && turnPhase === 'ACTION') {
-                                return; // Skip default move in ACTION buttons
-                            }
-                            
-                            const isActionSkill = category !== 'Utility' || isMoveSkill;
-
+                            if (skill.id === 'move' && turnPhase === 'ACTION') return; 
                             const isHealSupport = category === 'Heal' || category === 'Support';
                             const ringColor = isHealSupport ? 'ring-green-400' : 'ring-red-400';
-                            
                             const canUse = selectedChar.mp >= skill.mpCost && (skill.hpCost === undefined || selectedChar.hp > skill.hpCost);
                             const disabledClass = canUse ? '' : 'opacity-50 cursor-not-allowed';
-                            
                             let costText = "";
                             if (skill.mpCost > 0) costText += ` MP ${skill.mpCost}`;
                             if (skill.hpCost > 0) costText += ` HP ${skill.hpCost}`;
                             if (costText) costText = `[${costText.trim()}]`;
-
                             html += `<button data-skill-id="${skill.id}" data-category="${skill.category}" class="skill-btn ${selectedSkill === skill.id ? `ring-2 ${ringColor}` : ''} text-white p-2 flex items-center flex-col text-xs font-semibold ${disabledClass}" ${canUse ? '' : 'disabled'}>
                                 ${skill.icon} ${skill.name}
                                 <span class="text-gray-400 text-xs">${costText}</span>
@@ -2137,8 +2281,13 @@
                         });
                     }
                 });
-                
-                html += `</div><button id="undo-move-btn" class="w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white p-2">↩ 이동 취소</button>`;
+                html += `</div>`;
+
+                // 👇 [수정된 핵심 로직]
+                // '속박' 상태만 아니라면 '행동' 단계에서는 항상 '이동 취소' 버튼을 활성화합니다.
+                if (!isRooted) {
+                    html += `<button id="undo-move-btn" class="w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white p-2">↩ 이동 취소</button>`;
+                }
             }
 
             html += `<button id="end-turn-btn" class="w-full mt-4 bg-yellow-600 hover:bg-yellow-700 text-white p-2 font-bold">턴 종료</button>`;
@@ -2155,23 +2304,23 @@
         
         skillControls.innerHTML = html;
         document.getElementById('end-turn-btn')?.addEventListener('click', nextTurn);
-        document.getElementById('undo-move-btn')?.addEventListener('click', undoMove);
+        
+        const undoBtn = document.getElementById('undo-move-btn');
+        if (undoBtn && !undoBtn.disabled) {
+            undoBtn.addEventListener('click', undoMove);
+        }
+        
         document.querySelectorAll('.skill-btn').forEach(btn => btn.onclick = (e) => { 
             selectedSkill = e.currentTarget.dataset.skillId; 
-            // If it's a utility skill, we must switch to MOVE phase to highlight the range correctly.
             if (e.currentTarget.dataset.category === 'Utility') {
-                // Check if this Utility skill allows movement (range > 0)
                 const skillId = e.currentTarget.dataset.skillId;
-                if (SKILLS[skillId]?.range > 0) {
-                    turnPhase = 'MOVE';
-                }
+                if (SKILLS[skillId]?.range > 0) turnPhase = 'MOVE';
             } else {
                 turnPhase = 'ACTION';
             }
             render(); 
         });
     }
-    
     function updateCharacterList() {
         const listContent = document.getElementById('char-list-content');
         listContent.innerHTML = '';
@@ -2305,7 +2454,6 @@
             }
         });
 
-        // Set board background image
         if (boardBackgroundImage) {
             gameBoard.style.backgroundImage = `url('${boardBackgroundImage}')`;
         } else {
@@ -2315,6 +2463,21 @@
         
         const currentTurnChar = characters.length > 0 ? characters[currentTurnIndex] : null;
         updateAuthStatus();
+
+        const selectedChar = characters.find(c => c.id === selectedCharacterId);
+        const isMovingPhase = selectedChar && turnPhase === 'MOVE';
+        const isTargetingPhase = selectedChar && turnPhase === 'ACTION' && selectedSkill;
+
+        // =================================================================
+        // 👇 [핵심 수정] '조준 중' 상태에 따라 게임 보드에 클래스를 추가/제거합니다.
+        // =================================================================
+        const gameBoardEl = document.getElementById('game-board');
+        if (isTargetingPhase) {
+            gameBoardEl.classList.add('targeting-active');
+        } else {
+            gameBoardEl.classList.remove('targeting-active');
+        }
+
 
         characters.filter(char => char.x !== null).forEach(char => {
             const cell = gameBoard.querySelector(`.cell[data-x='${char.x}'][data-y='${char.y}']`);
@@ -2333,41 +2496,58 @@
                 const hpPercent = (char.hp / char.maxHp) * 100;
                 const mpPercent = (char.mp / char.maxMp) * 100;
 
-                // HP/MP Bars
                 token.innerHTML += `
                     <div class="hp-mp-bar-container">
                         <div class="hp-bar"><div class="hp-fill" style="width: ${hpPercent}%;"></div></div>
                         <div class="mp-bar"><div class="mp-fill" style="width: ${mpPercent}%;"></div></div>
                     </div>
                 `;
-                
-                // --- Turn Marker Insertion (for skipping move) ---
-                if (gameState === 'STARTED' && currentTurnChar && char.id === currentTurnChar.id && char.hp > 0) {
-                     // NEW: Apply glow to token itself
-                     token.classList.add('current-turn-glow');
 
+                if (char.statusEffects && char.statusEffects.some(e => e.id === 'rooted')) {
+                    const iconDiv = document.createElement('div');
+                    iconDiv.className = 'status-effect-icon';
+                    iconDiv.textContent = '🔗';
+                    token.appendChild(iconDiv);
+                }
+                
+                if (gameState === 'STARTED' && currentTurnChar && char.id === currentTurnChar.id && char.hp > 0) {
+                     token.classList.add('current-turn-glow');
                      const marker = document.createElement('div');
                      marker.className = 'turn-marker';
                      marker.innerHTML = '▼';
-                     marker.dataset.charId = char.id; // Add ID for click handling
+                     marker.dataset.charId = char.id;
                      marker.onclick = (e) => {
                          e.stopPropagation();
-                         const charId = e.currentTarget.dataset.charId;
-                         // Check if the current user has control over this char
-                         if (canControlCharacter(charId) && turnPhase === 'MOVE') {
-                             selectedCharacterId = charId; // Ensure selected
-                             turnPhase = 'ACTION'; // Skip move phase
+                         if (canControlCharacter(char.id) && turnPhase === 'MOVE') {
+                             selectedCharacterId = char.id;
+                             turnPhase = 'ACTION';
                              selectedSkill = null;
-                             preMovePosition = { x: currentTurnChar.x, y: currentTurnChar.y }; // Use current position for 0-move
+                             preMovePosition = { x: currentTurnChar.x, y: currentTurnChar.y };
                              logAction(`⏩ ${currentTurnChar.name}이(가) 이동 단계를 건너뛰었습니다. (제자리 이동)`, "system");
                              render();
                          }
                      };
                      token.appendChild(marker);
                 }
-                // --- End Turn Marker Insertion ---
                 
-                if (char.id === selectedCharacterId) token.classList.add('selected-character');
+                let shouldBeClickThrough = false;
+
+                if (isMovingPhase && char.id === selectedCharacterId && char.size > 1) {
+                    shouldBeClickThrough = true;
+                }
+
+                if (isTargetingPhase && char.id !== selectedCharacterId && char.size > 1) {
+                    shouldBeClickThrough = true;
+                }
+
+                if (shouldBeClickThrough) {
+                    token.classList.add('token-click-through');
+                }
+
+                if (char.id === selectedCharacterId) {
+                    token.classList.add('selected-character');
+                }
+
                 cell.appendChild(token);
             }
         });
@@ -2380,19 +2560,16 @@
             if(currentTurnChar) turnStatus.style.color = currentTurnChar.type === 'ENEMY' ? '#f87171' : '#34d399';
         }
 
-        // Apply new stylish class to turn status box
         document.getElementById('turn-status').classList.add('stylish-turn-box');
         
-        const selectedChar = characters.find(c => c.id === selectedCharacterId);
-        const isMyTurn = selectedChar && currentTurnChar && selectedChar.id === currentTurnChar.id;
+        const selectedCharForSkills = characters.find(c => c.id === selectedCharacterId);
+        const isMyTurn = selectedCharForSkills && currentTurnChar && selectedCharForSkills.id === currentTurnChar.id;
 
         if (gameState === 'STARTED') {
-            const canControl = isAdmin || (isMyTurn && selectedChar?.id === loggedInCharId);
-            // NEW: Determine effective skill for range highlighting. If in MOVE phase, use 'move' or the selected Utility skill.
+            const canControl = isAdmin || (isMyTurn && selectedCharForSkills?.id === loggedInCharId);
             let effectiveSkillId = 'move';
-            // Check for character-specific move range
-            if (selectedChar && selectedChar.moveRange !== undefined && SKILLS['move']) {
-                 SKILLS['move'].range = selectedChar.moveRange;
+            if (selectedCharForSkills && selectedCharForSkills.moveRange !== undefined && SKILLS['move']) {
+                 SKILLS['move'].range = selectedCharForSkills.moveRange;
             }
             
             if (turnPhase === 'MOVE' && selectedSkill && SKILLS[selectedSkill]?.category === 'Utility') {
@@ -2401,8 +2578,8 @@
                 effectiveSkillId = selectedSkill;
             }
             
-            if (canControl && selectedChar && effectiveSkillId) {
-                highlightRange(selectedChar, effectiveSkillId);
+            if (canControl && selectedCharForSkills && effectiveSkillId) {
+                highlightRange(selectedCharForSkills, effectiveSkillId);
             } else {
                 highlightRange(null, null);
             }
@@ -2410,7 +2587,7 @@
             highlightRange(null, null);
         }
         
-        renderSkillButtons(selectedChar, isMyTurn);
+        renderSkillButtons(selectedCharForSkills, isMyTurn);
         updateCharacterList();
         renderCharacterSelectionOverlay();
     }
@@ -2636,14 +2813,47 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
         selectedCharacterId = null;
         render();
     }
+async function resetAllCharacterStats() {
+    if (!gameId) return;
+    
+    const charCollectionRef = collection(db, "games", gameId, "characters");
+    const snapshot = await getDocs(charCollectionRef);
+    
+    if (!snapshot.empty) {
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(charDoc => {
+            const charData = charDoc.data();
+            batch.update(charDoc.ref, {
+                hp: charData.maxHp, // 현재 HP를 최대 HP로 설정
+                mp: charData.maxMp, // [수정된 부분] MP도 최대 MP로 설정
+                x: null,             // 보드에서 배치 해제
+                y: null,
+                statusEffects: []    // [추가] 모든 상태 효과(버프/디버프)도 제거
+            });
+        });
+        await batch.commit();
+        console.log('All character stats, status effects, and positions have been reset.');
+    }
+}
 
     async function resetAllGameData() {
         if (!gameId) return;
-        await resetBoardPositions();
-        await seedInitialCharacters(gameId);
+
+        // 👇 [수정] 기존의 두 함수 호출을 새로운 초기화 함수로 교체합니다.
+        // await resetBoardPositions();
+        // await seedInitialCharacters(gameId);
+        await resetAllCharacterStats();
+
         await setDoc(doc(db, 'games', gameId, 'board', 'tiles'), { tiles: {} });
-        await setDoc(doc(db, 'games', gameId), { gameState: 'PREPARATION', currentTurnIndex: 0, currentTurnCharId: null, round: 1 }, { merge: true });
-        await logAction(`⚠️ 관리자가 전체 게임을 초기화했습니다. 캐릭터 목록과 맵이 기본 상태로 복원됩니다.`, "admin");
+        await setDoc(doc(db, 'games', gameId), { 
+            gameState: 'PREPARATION', 
+            currentTurnIndex: 0, 
+            currentTurnCharId: null, 
+            round: 1 
+        }, { merge: true });
+
+        // 👇 [수정] 로그 메시지를 더 명확하게 변경합니다.
+        await logAction(`⚠️ 관리자가 전체 게임을 초기화했습니다. 모든 캐릭터의 HP가 회복되고 재배치를 기다립니다.`, "admin");
     }
 
     // --- Map Edit Close Functions (Refactored) ---
@@ -2703,18 +2913,17 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
     }
 
 
-    function openAdminModal() {
+      function openAdminModal() {
         if (!gameId) return;
 
-        // 관리자 패널을 열 때 맵 편집 모달을 닫습니다.
         closeModal('map-edit-modal'); 
-        // isMapEditMode는 Map Edit Modal의 종료 버튼에 의해서만 false로 바뀝니다.
         
         const container = document.getElementById('admin-modal-content');
-        container.innerHTML = `<div class="flex justify-between items-center mb-6"><h3 class="text-2xl font-bold font-title" style="color: var(--accent-primary);">관리자 패널</h3><button id="close-admin-modal-btn" class="hover:text-white text-3xl leading-none">&times;</button></div>`;
+        
+        // --- 1. 모든 HTML을 하나의 변수에 먼저 만듭니다. ---
+        let modalHtml = `<div class="flex justify-between items-center mb-6"><h3 class="text-2xl font-bold font-title" style="color: var(--accent-primary);">관리자 패널</h3><button id="close-admin-modal-btn" class="hover:text-white text-3xl leading-none">&times;</button></div>`;
 
-        // Game State Management
-        container.innerHTML += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
+        modalHtml += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
             <h4 class="font-bold text-lg mb-4 text-yellow-400">게임 진행 관리</h4>
             <div class="grid grid-cols-2 gap-4">
                 <button id="set-prep-phase-btn" class="w-full bg-blue-600 p-2">준비 단계로 설정</button>
@@ -2725,6 +2934,9 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
             <div class="mt-4 grid grid-cols-2 gap-4">
                 <button id="reset-board-pos-btn" class="w-full bg-red-700 p-2">보드 초기화 (미배치)</button>
                 <button id="reset-all-game-btn" class="w-full bg-red-900 p-2">⚠️ 전체 게임 재시작</button>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                 <button id="clear-log-btn" class="w-full bg-yellow-700 hover:bg-yellow-600 p-2">📜 게임 로그 지우기</button>
             </div>
             <div class="mt-4">
                 <label for="max-rounds-input" class="block text-sm font-medium text-gray-300">최대 라운드 (0=무한)</label>
@@ -2738,12 +2950,19 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
                 <label for="admin-move-toggle" class="ml-2 block text-sm text-gray-300 font-medium">관리자 토큰 이동 허용 (턴 무시)</label>
             </div>
         </div>`;
-        
-         // Map Edit Toggle
-        container.innerHTML += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
+        modalHtml += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
+    <h4 class="font-bold text-lg mb-4 text-yellow-400">방 설정 저장/불러오기</h4>
+    <p class="text-sm text-gray-400 mb-4">현재 게임의 모든 설정(캐릭터, 스킬, 맵 등)을 하나의 파일로 저장하거나, 파일에서 불러와 덮어씌웁니다.</p>
+    <div class="grid grid-cols-2 gap-4">
+        <button id="save-settings-btn" class="w-full bg-blue-600 p-2">설정 파일로 저장하기</button>
+        <button id="load-settings-btn" class="w-full bg-green-600 p-2">파일에서 불러오기</button>
+    </div>
+    <input type="file" id="load-settings-input" class="hidden" accept=".json">
+</div>`;
+
+modalHtml += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
             <h4 class="font-bold text-lg mb-4 text-yellow-400">맵/지형 및 배경 관리</h4>
             <button id="open-map-edit-btn" class="w-full bg-purple-600 p-2 font-bold ${gameState !== 'PREPARATION' ? 'opacity-50 cursor-not-allowed' : ''}" ${gameState !== 'PREPARATION' ? 'disabled' : ''}>맵 편집 모드 ${isMapEditMode ? '종료' : '시작'}</button>
-            
             <div class="mt-4 pt-4 border-t border-gray-700/50">
                 <label for="board-bg-url" class="block text-sm font-medium text-gray-300">게임 보드 배경 URL</label>
                 <div class="flex gap-2 mt-1">
@@ -2751,7 +2970,6 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
                     <button id="save-board-bg-btn" class="bg-indigo-600 p-2 px-4">적용</button>
                 </div>
             </div>
-
             <div class="mt-4 pt-4 border-t border-gray-700/50">
                 <label for="page-bg-url" class="block text-sm font-medium text-gray-300">전체 페이지 배경 URL</label>
                 <div class="flex gap-2 mt-1">
@@ -2761,8 +2979,6 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
             </div>
         </div>`;
 
-
-        // Skill Management (Categorized view)
         const skillsByCategory = Object.values(SKILLS).reduce((acc, s) => {
             const category = s.category || 'Other';
             if (!acc[category]) acc[category] = [];
@@ -2770,118 +2986,79 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
             return acc;
         }, {});
 
-        let skillHtml = `
-        <div id="admin-skill-list" class="space-y-6">
-            <h3 class="text-2xl font-bold font-title" style="color: var(--accent-primary);">스킬 목록/편집</h3>`;
-
+        let skillHtml = `<div id="admin-skill-list" class="space-y-6"><h3 class="text-2xl font-bold font-title" style="color: var(--accent-primary);">스킬 목록/편집</h3>`;
         SKILL_CATEGORIES.forEach(category => {
             const skills = skillsByCategory[category];
             if (skills && skills.length > 0) {
-                const categoryColor = {
-                    'Attack': 'border-red-600',
-                    'Support': 'border-blue-600',
-                    'Heal': 'border-green-600',
-                    'Utility': 'border-gray-500',
-                    'Defense': 'border-yellow-600',
-                    'Other': 'border-purple-600'
-                }[category];
-
-                skillHtml += `<div class="mt-4">
-                    <h4 class="font-bold text-xl mb-3 text-white border-b border-gray-700 pb-1">${category} 스킬</h4>
-                    <div class="space-y-3">`;
-                
+                skillHtml += `<div class="mt-4"><h4 class="font-bold text-xl mb-3 text-white border-b border-gray-700 pb-1">${category} 스킬</h4><div class="space-y-3">`;
                 skills.sort((a, b) => a.name.localeCompare(b.name)).forEach(s => {
-                    // Check if specific costs exist to display them
-                    const costDisplay = [
-                        s.mpCost > 0 ? `${s.mpCost} MP` : '',
-                        s.hpCost > 0 ? `${s.hpCost} HP` : ''
-                    ].filter(Boolean).join(', ');
-
-                    skillHtml += `<div class="p-4 rounded-md bg-gray-800 border-l-4 ${categoryColor}">
-                        <h4 class="font-bold text-lg">${s.icon} ${s.name} <span class="text-sm text-gray-400">(${s.id})</span></h4>
-                        <p class="text-xs text-gray-500 mb-2">비용: ${costDisplay || '없음'} | 범위: ${s.range} | 계수: ${s.multiplier} | 유형: ${s.type}</p>
-                        <div class="grid grid-cols-4 gap-2 mt-2">
-                            <input id="admin-name-${s.id}" class="form-input col-span-2" placeholder="이름" value="${s.name}">
-                            <input id="admin-category-${s.id}" class="form-input" placeholder="분류 (Attack/Support...)" value="${s.category || 'Other'}">
-                            <input id="admin-type-${s.id}" class="form-input" placeholder="타입 (Melee/Heal...)" value="${s.type}">
-                            <input id="admin-icon-${s.id}" placeholder="아이콘" class="form-input" value="${s.icon || ''}">
-                            
-                            <input id="admin-range-${s.id}" type="number" class="form-input" placeholder="사거리" value="${s.range}">
-                            <input id="admin-multiplier-${s.id}" type="number" step="0.1" class="form-input" placeholder="계수" value="${s.multiplier}">
-                            <input id="admin-mpcost-${s.id}" type="number" class="form-input" placeholder="MP 비용" value="${s.mpCost || 0}">
-                            <input id="admin-hpcost-${s.id}" type="number" class="form-input" placeholder="HP 비용" value="${s.hpCost || 0}">
+                    const costDisplay = [s.mpCost > 0 ? `${s.mpCost} MP` : '', s.hpCost > 0 ? `${s.hpCost} HP` : ''].filter(Boolean).join(', ');
+                    skillHtml += `
+                    <div class="bg-gray-800 rounded-md overflow-hidden border border-gray-700">
+                        <div class="accordion-header flex justify-between items-center p-3 cursor-pointer hover:bg-gray-700/50 transition-colors">
+                            <div>
+                                <h4 class="font-bold text-lg">${s.icon} ${s.name} <span class="text-sm text-gray-400">(${s.id})</span></h4>
+                                <p class="text-xs text-gray-500 mt-1">비용: ${costDisplay || '없음'} | 범위: ${s.range} | 계수: ${s.multiplier} | 타입: ${s.type}</p>
+                            </div>
+                            <span class="accordion-icon text-xl transform transition-transform text-gray-400">▼</span>
                         </div>
-                        <div class="flex justify-between items-center mt-2 pt-2 border-t border-gray-700/50">
-                            <button data-skill-id="${s.id}" class="save-skill-btn bg-green-600 p-2 text-sm flex-grow mr-2">저장</button>
-                            <button data-skill-id="${s.id}" data-skill-name="${s.name}" class="delete-skill-btn bg-red-700 hover:bg-red-600 p-2 text-sm text-white">삭제</button>
+                        <div class="accordion-content hidden p-4 border-t border-gray-700/50">
+                            ${getSkillEditFormHtml(s)}
                         </div>
                     </div>`;
                 });
                 skillHtml += `</div></div>`;
             }
         });
+        skillHtml += `</div>`;
+        modalHtml += skillHtml;
 
-        // Character Management (이 부분 바로 위에 있는 Skill Management 코드의 마지막 부분입니다)
-        skillHtml += `<div class="mt-8 pt-4 border-t border-gray-700">
+        modalHtml += `<div class="mt-8 pt-4 border-t border-gray-700">
             <h4 class="font-bold text-lg mb-2 text-green-400">새 스킬 추가</h4>
-            <div class="grid grid-cols-2 gap-4">
-                <input id="new-skill-id" placeholder="스킬 ID (e.g., fireball)" class="form-input">
-                <input id="new-skill-name" placeholder="스킬 이름" class="form-input">
-                <select id="new-skill-category" class="form-input bg-gray-700">
-                    ${SKILL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
-                </select>
-                <select id="new-skill-type" class="form-input bg-gray-700">
-                    <option value="Melee">Melee</option><option value="Ranged">Ranged</option><option value="Heal">Heal</option><option value="Utility">Utility</option><option value="Support">Support</option>
-                </select>
-                <input id="new-skill-icon" placeholder="아이콘 (e.g., 🔥)" class="form-input">
-                <input id="new-skill-range" type="number" placeholder="사거리" class="form-input">
-                <input id="new-skill-multiplier" type="number" step="0.1" placeholder="피해/회복 계수" class="form-input">
-                <input id="new-skill-mpcost" type="number" placeholder="MP 비용" class="form-input" value="0">
-            </div>
-            
-            <div class="mt-4 pt-4 border-t border-gray-600">
-                <h5 class="font-bold text-md mb-2 text-yellow-400">광역 스킬(AoE) 설정</h5>
-                <div class="grid grid-cols-3 gap-4 items-center">
-                    <div class="flex items-center gap-2">
-                        <input id="new-skill-isAoe" type="checkbox" class="form-checkbox h-5 w-5">
-                        <label for="new-skill-isAoe">광역 스킬 여부</label>
-                    </div>
-                    <input id="new-skill-aoeRange" type="number" placeholder="광역 범위 (e.g., 1)" class="form-input">
-                    <select id="new-skill-aoeShape" class="form-input bg-gray-700">
-                        <option value="square">정사각형</option>
-                        <option value="diamond">마름모</option>
-                    </select>
-                </div>
-            </div>
-            <button id="add-new-skill-btn" class="mt-4 bg-blue-600 p-2 w-full">새 스킬 저장</button>
-        </div></div>`;
-        container.innerHTML += skillHtml;
-
-        // Character Management 
-        container.innerHTML += `<div class="mt-8 pt-4 border-t border-gray-700">
-            <h4 class="font-bold text-lg mb-2 text-green-400">새 캐릭터/에너미 추가</h4>
-            <div class="grid grid-cols-2 gap-4">
-                <input id="new-char-name" placeholder="이름" class="form-input">
-                <select id="new-char-type" class="form-input bg-gray-700"><option value="PC">PC</option><option value="ENEMY">ENEMY</option></select>
-                <input id="new-char-imageUrl" placeholder="이미지 URL" class="form-input col-span-2">
-                
-                <div class="relative"><input id="new-char-hp" type="number" placeholder=" " class="form-input peer" value="100"><label for="new-char-hp" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">HP (체력)</label></div>
-                <div class="relative"><input id="new-char-mp" type="number" placeholder=" " class="form-input peer" value="50"><label for="new-char-mp" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">MP (마나)</label></div>
-                
-                <div class="relative"><input id="new-char-min-attack" type="number" placeholder=" " class="form-input peer" value="10"><label for="new-char-min-attack" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최소 공격력</label></div>
-                <div class="relative"><input id="new-char-max-attack" type="number" placeholder=" " class="form-input peer" value="15"><label for="new-char-max-attack" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최대 공격력</label></div>
-
-                <div class="relative"><input id="new-char-min-defense" type="number" placeholder=" " class="form-input peer" value="3"><label for="new-char-min-defense" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최소 방어력</label></div>
-                <div class="relative"><input id="new-char-max-defense" type="number" placeholder=" " class="form-input peer" value="7"><label for="new-char-max-defense" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최대 방어력</label></div>
-
-                <div class="relative"><input id="new-char-size" type="number" placeholder=" " class="form-input peer" value="1"><label for="new-char-size" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">크기 (1x1, 2x2...)</label></div>
-                <input id="new-char-skills" placeholder="스킬 ID (e.g. slash,shoot)" class="form-input">
-            </div>
-            <button id="add-new-char-btn" class="mt-4 bg-blue-600 p-2 w-full">새 캐릭터 저장</button>
+            ${getNewSkillFormHtml()}
         </div>`;
 
-        document.getElementById('close-admin-modal-btn').onclick = () => closeModal('admin-modal');
+        modalHtml += `<div class="mt-8 pt-4 border-t border-gray-700">
+            <h4 class="font-bold text-lg mb-2 text-green-400">새 캐릭터/에너미 추가</h4>
+            ${getNewCharacterFormHtml()}
+        </div>`;
 
+        // --- 2. 완성된 HTML을 화면에 딱 한 번만 그립니다. ---
+        container.innerHTML = modalHtml;
+
+        // --- 3. 화면에 모든 요소가 그려진 후에, 모든 이벤트 리스너를 연결합니다. ---
+
+        // 아코디언 기능 연결
+        const skillListContainer = container.querySelector('#admin-skill-list');
+        if (skillListContainer) {
+            skillListContainer.addEventListener('click', e => {
+                const header = e.target.closest('.accordion-header');
+                if (!header) return;
+                const content = header.nextElementSibling;
+                const icon = header.querySelector('.accordion-icon');
+                if (content && content.classList.contains('accordion-content')) {
+                    content.classList.toggle('hidden');
+                    icon.classList.toggle('rotate-180');
+                }
+            });
+        }
+        
+        // [추가] 설정 저장/불러오기 버튼 기능 연결
+        document.getElementById('save-settings-btn').onclick = saveSettingsToFile;
+        document.getElementById('load-settings-btn').onclick = () => {
+            document.getElementById('load-settings-input').click();
+        };
+        document.getElementById('load-settings-input').onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                loadSettingsFromFile(file);
+            }
+            // 같은 파일을 다시 로드할 수 있도록 값을 초기화합니다.
+            e.target.value = null;
+        };
+        
+        // 나머지 모든 버튼 기능 연결
+        document.getElementById('close-admin-modal-btn').onclick = () => closeModal('admin-modal');
         document.getElementById('set-prep-phase-btn').onclick = async () => {
             if (gameId) {
                 await updateDoc(doc(db, 'games', gameId), { gameState: 'PREPARATION', currentTurnIndex: 0, currentTurnCharId: null, round: 1 });
@@ -2893,11 +3070,11 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
             if (gameId) {
                 await updateDoc(doc(db, 'games', gameId), { gameState: 'STARTED' });
                 await logAction(`⚔️ 게임이 시작되었습니다! 첫 번째 턴부터 진행합니다.`, "system");
-                showCustomModal("게임 시작", "전투를 시작합니다!", [{text: "확인", class: "bg-green-600"}]);
+                showBannerAnnouncement("FIGHT!", "게임 시작", '2rem', '4rem');
             }
         };
-        document.getElementById('prev-turn-btn').onclick = async () => { if (gameId) await previousTurn(); };
-        document.getElementById('next-turn-btn').onclick = async () => { if (gameId) await nextTurn(); };
+        document.getElementById('prev-turn-btn').onclick = () => { if (gameId) previousTurn(); };
+        document.getElementById('next-turn-btn').onclick = () => { if (gameId) nextTurn(); };
         document.getElementById('save-max-rounds-btn').onclick = async () => {
             if (gameId) {
                 const newMaxRounds = parseInt(document.getElementById('max-rounds-input').value) || 0;
@@ -2906,21 +3083,27 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
             }
         };
         document.getElementById('reset-board-pos-btn').onclick = resetBoardPositions;
-        document.getElementById('reset-all-game-btn').onclick = async () => {
+        document.getElementById('reset-all-game-btn').onclick = () => {
             showCustomModal("전체 초기화 경고", "모든 캐릭터, 맵 지형, 게임 로그가 완전히 초기화됩니다. 계속하시겠습니까?", [
                 { text: "취소", class: "bg-gray-600" },
                 { text: "확인 (초기화)", class: "bg-red-600", onClick: resetAllGameData }
             ]);
         };
-
+        document.getElementById('clear-log-btn').onclick = () => {
+            showCustomModal("로그 삭제 확인", "정말로 게임 로그를 모두 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.", [
+                { text: "취소", class: "bg-gray-600" },
+                { text: "삭제", class: "bg-red-600", onClick: async () => {
+                        await deleteLogsCollection(gameId);
+                        await logAction('📜 관리자가 모든 게임 로그를 삭제했습니다.', 'admin');
+                    } 
+                }
+            ]);
+        };
         document.getElementById('open-map-edit-btn').onclick = openMapEditModal;
-        
-        // NEW: Background Image Save Listener
         document.getElementById('save-board-bg-btn').onclick = () => {
             const url = document.getElementById('board-bg-url').value.trim();
             saveBoardBackground(url);
         };
-
         document.getElementById('save-page-bg-btn').onclick = async () => {
             const url = document.getElementById('page-bg-url').value.trim();
             if (gameId) {
@@ -2928,7 +3111,6 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
                 await logAction(`🖼️ 관리자가 전체 페이지 배경을 설정했습니다.`, "admin");
             }
         };
-
         document.getElementById('admin-move-toggle').onchange = async (e) => {
             const isChecked = e.target.checked;
             if (gameId) {
@@ -2936,26 +3118,27 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
                 await logAction(`👮 관리자 토큰 이동 권한이 ${isChecked ? '허용' : '제한'}되었습니다.`, "admin-move");
             }
         };
-        
         document.querySelectorAll('.save-skill-btn').forEach(btn => {
             btn.onclick = async e => {
                 const id = e.target.dataset.skillId;
-                const updated = { 
-                    ...SKILLS[id], 
-                    name: document.getElementById(`admin-name-${id}`).value, 
-                    range: parseFloat(document.getElementById(`admin-range-${id}`).value), 
-                    multiplier: parseFloat(document.getElementById(`admin-multiplier-${id}`).value),
-                    type: document.getElementById(`admin-type-${id}`).value,
-                    icon: document.getElementById(`admin-icon-${id}`).value,
-                    category: document.getElementById(`admin-category-${id}`).value,
-                    mpCost: parseInt(document.getElementById(`admin-mpcost-${id}`).value) || 0,
-                    hpCost: parseInt(document.getElementById(`admin-hpcost-${id}`).value) || 0,
-                };
-                if (gameId) { await setDoc(doc(db, 'games', gameId), { skills: { ...SKILLS, [id]: updated } }, { merge: true }); }
+                const updated = { ...SKILLS[id], name: document.getElementById(`admin-name-${id}`).value, range: parseFloat(document.getElementById(`admin-range-${id}`).value), multiplier: parseFloat(document.getElementById(`admin-multiplier-${id}`).value), type: document.getElementById(`admin-type-${id}`).value, icon: document.getElementById(`admin-icon-${id}`).value, category: document.getElementById(`admin-category-${id}`).value, mpCost: parseInt(document.getElementById(`admin-mpcost-${id}`).value) || 0, isAoe: document.getElementById(`admin-isAoe-${id}`).checked, aoeRange: parseInt(document.getElementById(`admin-aoeRange-${id}`).value) || 0, aoeShape: document.getElementById(`admin-aoeShape-${id}`).value };
+                if (document.getElementById(`admin-hasEffect-${id}`).checked) {
+                    const effectId = document.getElementById(`admin-effect-id-${id}`).value.trim();
+                    const effectName = document.getElementById(`admin-effect-name-${id}`).value.trim();
+                    if (effectId && effectName) {
+                        updated.appliesEffect = { id: effectId, name: effectName, effectType: document.getElementById(`admin-effect-type-${id}`).value, turns: parseInt(document.getElementById(`admin-effect-turns-${id}`).value) || 0, value: parseInt(document.getElementById(`admin-effect-value-${id}`).value) || 0 };
+                    }
+                } else {
+                    if (updated.hasOwnProperty('appliesEffect')) delete updated.appliesEffect;
+                }
+                if (gameId) { 
+                    const updatedSkills = { ...SKILLS, [id]: updated };
+                    await setDoc(doc(db, 'games', gameId), { skills: updatedSkills }, { merge: true });
+                    showCustomModal("저장 완료", `'${updated.name}' 스킬 정보가 저장되었습니다.`, [{text: "확인", class: "bg-green-600"}]);
+                }
             };
         });
-        
-        document.querySelectorAll('.delete-skill-btn').forEach(btn => { // NEW: Delete skill listener
+        document.querySelectorAll('.delete-skill-btn').forEach(btn => {
             btn.onclick = (e) => {
                 const skillId = e.currentTarget.dataset.skillId;
                 const skillName = e.currentTarget.dataset.skillName;
@@ -2965,54 +3148,142 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
                 ]);
             };
         });
-
         document.getElementById('add-new-skill-btn').onclick = async () => {
             const newId = document.getElementById('new-skill-id').value.trim();
-            if (!newId || SKILLS[newId]) {
-                showCustomModal("오류", "유효하지 않거나 중복된 스킬 ID입니다.", [{text: "확인", class: "bg-red-600"}]);
-                return;
+            if (!newId || SKILLS[newId]) { showCustomModal("오류", "유효하지 않거나 중복된 스킬 ID입니다.", [{text: "확인", class: "bg-red-600"}]); return; }
+            const newSkill = { id: newId, name: document.getElementById('new-skill-name').value, type: document.getElementById('new-skill-type').value, icon: document.getElementById('new-skill-icon').value, range: parseFloat(document.getElementById('new-skill-range').value) || 0, multiplier: parseFloat(document.getElementById('new-skill-multiplier').value) || 0, category: document.getElementById('new-skill-category').value, mpCost: parseInt(document.getElementById('new-skill-mpcost').value) || 0, hpCost: 0, isAoe: document.getElementById('new-skill-isAoe').checked, aoeRange: parseInt(document.getElementById('new-skill-aoeRange').value) || 0, aoeShape: document.getElementById('new-skill-aoeShape').value, rangeShape: 'square' };
+            if (document.getElementById('new-skill-hasEffect').checked) {
+                const effectId = document.getElementById('new-skill-effect-id').value.trim();
+                const effectName = document.getElementById('new-skill-effect-name').value.trim();
+                if (!effectId || !effectName) { showCustomModal("오류", "지속 효과를 적용하려면 효과 ID와 이름을 모두 입력해야 합니다.", [{text: "확인", class: "bg-red-600"}]); return; }
+                newSkill.appliesEffect = { id: effectId, name: effectName, effectType: document.getElementById('new-skill-effect-type').value, turns: parseInt(document.getElementById('new-skill-effect-turns').value) || 0, value: parseInt(document.getElementById('new-skill-effect-value').value) || 0 };
             }
-            const newSkill = { 
-                id: newId, 
-                name: document.getElementById('new-skill-name').value, 
-                type: document.getElementById('new-skill-type').value, 
-                icon: document.getElementById('new-skill-icon').value, 
-                range: parseFloat(document.getElementById('new-skill-range').value) || 0, 
-                multiplier: parseFloat(document.getElementById('new-skill-multiplier').value) || 0,
-                category: document.getElementById('new-skill-category').value,
-                mpCost: parseInt(document.getElementById('new-skill-mpcost').value) || 0,
-                hpCost: 0,
-                // --- 아래 4줄을 추가하세요 ---
-                isAoe: document.getElementById('new-skill-isAoe').checked,
-                aoeRange: parseInt(document.getElementById('new-skill-aoeRange').value) || 0,
-                aoeShape: document.getElementById('new-skill-aoeShape').value,
-                rangeShape: 'square' // 기본 타겟팅 모양 (화염구와 동일하게)
-            };
             if (gameId) {
                 await setDoc(doc(db, 'games', gameId), { skills: { ...SKILLS, [newId]: newSkill } }, { merge: true });
                 showCustomModal("성공", `'${newSkill.name}' 스킬이 추가되었습니다.`, [{text: "확인", class: "bg-green-600"}]);
+                openAdminModal(); 
             }
         };
-
         document.getElementById('add-new-char-btn').onclick = async () => {
             const name = document.getElementById('new-char-name').value.trim();
             if (!name) { showCustomModal("오류", "이름을 입력해야 합니다.", [{text: "확인", class: "bg-red-600"}]); return; }
             const type = document.getElementById('new-char-type').value;
             const skills = document.getElementById('new-char-skills').value.split(',').map(s => s.trim()).filter(Boolean);
-            
-            const newChar = { name: name, type: type, imageUrl: document.getElementById('new-char-imageUrl').value.trim(), 
-                hp: parseInt(document.getElementById('new-char-hp').value) || 100, maxHp: parseInt(document.getElementById('new-char-hp').value) || 100, 
-                mp: parseInt(document.getElementById('new-char-mp').value) || 50, maxMp: parseInt(document.getElementById('new-char-mp').value) || 50, 
-                minAttack: parseInt(document.getElementById('new-char-min-attack').value) || 10, maxAttack: parseInt(document.getElementById('new-char-max-attack').value) || 15, 
-                minDefense: parseInt(document.getElementById('new-char-min-defense').value) || 3, maxDefense: parseInt(document.getElementById('new-char-max-defense').value) || 7, 
-                size: parseInt(document.getElementById('new-char-size').value) || 1, 
-                skills: skills, x: null, y: null, turnOrder: characters.length + 1, password: type === 'PC' ? DEFAULT_PC_PASSWORD : '' };
-            
+            const newChar = { name: name, type: type, imageUrl: document.getElementById('new-char-imageUrl').value.trim(), hp: parseInt(document.getElementById('new-char-hp').value) || 100, maxHp: parseInt(document.getElementById('new-char-hp').value) || 100, mp: parseInt(document.getElementById('new-char-mp').value) || 50, maxMp: parseInt(document.getElementById('new-char-mp').value) || 50, minAttack: parseInt(document.getElementById('new-char-min-attack').value) || 10, maxAttack: parseInt(document.getElementById('new-char-max-attack').value) || 15, minDefense: parseInt(document.getElementById('new-char-min-defense').value) || 3, maxDefense: parseInt(document.getElementById('new-char-max-defense').value) || 7, size: parseInt(document.getElementById('new-char-size').value) || 1, skills: skills, x: null, y: null, turnOrder: characters.length + 1, password: type === 'PC' ? DEFAULT_PC_PASSWORD : '' };
             if (gameId) {
                 await addDoc(collection(db, "games", gameId, "characters"), newChar);
                 showCustomModal("성공", `'${newChar.name}' 캐릭터가 추가되었습니다.`, [{text: "확인", class: "bg-green-600"}]);
             }
         };
+
+        adminModal.classList.remove('hidden');
+    }
+
+    // --- Helper functions for generating HTML forms to keep openAdminModal clean ---
+    function getSkillEditFormHtml(s) {
+        return `
+            <div class="grid grid-cols-4 gap-3 mt-2 text-sm">
+                <div class="col-span-2"><label class="block text-xs font-medium text-gray-400">스킬 이름</label><input id="admin-name-${s.id}" class="form-input mt-1" value="${s.name}"></div>
+                <div><label class="block text-xs font-medium text-gray-400">분류</label><input id="admin-category-${s.id}" class="form-input mt-1" value="${s.category || 'Other'}"></div>
+                <div><label class="block text-xs font-medium text-gray-400">아이콘</label><input id="admin-icon-${s.id}" class="form-input mt-1" value="${s.icon || ''}"></div>
+                <div><label class="block text-xs font-medium text-gray-400">사거리 (칸)</label><input id="admin-range-${s.id}" type="number" class="form-input mt-1" value="${s.range}"></div>
+                <div><label class="block text-xs font-medium text-gray-400">계수 (배율)</label><input id="admin-multiplier-${s.id}" type="number" step="0.1" class="form-input mt-1" value="${s.multiplier}"></div>
+                <div><label class="block text-xs font-medium text-gray-400">MP 비용</label><input id="admin-mpcost-${s.id}" type="number" class="form-input mt-1" value="${s.mpCost || 0}"></div>
+                <div><label class="block text-xs font-medium text-gray-400">HP 비용</label><input id="admin-hpcost-${s.id}" type="number" class="form-input mt-1" value="${s.hpCost || 0}"></div>
+                <input id="admin-type-${s.id}" type="hidden" value="${s.type}">
+            </div>
+            <div class="mt-3 pt-3 border-t border-gray-700 space-y-3">
+                <div>
+                    <h5 class="font-bold text-sm mb-1 text-yellow-400">광역(AoE) 설정</h5>
+                    <div class="grid grid-cols-3 gap-3 items-center">
+                        <div class="flex items-center gap-2"><input id="admin-isAoe-${s.id}" type="checkbox" class="form-checkbox h-5 w-5" ${s.isAoe ? 'checked' : ''}><label for="admin-isAoe-${s.id}">광역 스킬</label></div>
+                        <div><label class="block text-xs font-medium text-gray-400">광역 범위</label><input id="admin-aoeRange-${s.id}" type="number" class="form-input mt-1" value="${s.aoeRange || 0}"></div>
+                        <div><label class="block text-xs font-medium text-gray-400">광역 형태</label><select id="admin-aoeShape-${s.id}" class="form-input mt-1 bg-gray-700"><option value="square" ${s.aoeShape === 'square' ? 'selected' : ''}>정사각형</option><option value="diamond" ${s.aoeShape === 'diamond' ? 'selected' : ''}>마름모</option></select></div>
+                    </div>
+                </div>
+                <div>
+                    <h5 class="font-bold text-sm mb-1 text-cyan-400">지속 효과(DoT/HoT) 설정</h5>
+                    <div class="flex items-center gap-2 mb-2"><input id="admin-hasEffect-${s.id}" type="checkbox" class="form-checkbox h-5 w-5" ${s.appliesEffect ? 'checked' : ''}><label for="admin-hasEffect-${s.id}">지속 효과 적용</label></div>
+                    <div class="grid grid-cols-6 gap-3">
+                        <div class="col-span-2"><label class="block text-xs font-medium text-gray-400">효과 ID</label><input id="admin-effect-id-${s.id}" class="form-input mt-1" value="${s.appliesEffect?.id || ''}"></div>
+                        <div><label class="block text-xs font-medium text-gray-400">효과 이름</label><input id="admin-effect-name-${s.id}" class="form-input mt-1" value="${s.appliesEffect?.name || ''}"></div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-400">효과 종류</label>
+                            <select id="admin-effect-type-${s.id}" class="form-input mt-1 bg-gray-700">
+                                <option value="damage" ${s.appliesEffect?.effectType === 'damage' ? 'selected' : ''}>피해(DoT)</option>
+                                <option value="heal" ${s.appliesEffect?.effectType === 'heal' ? 'selected' : ''}>회복(HoT)</option>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-medium text-gray-400">지속 턴</label><input id="admin-effect-turns-${s.id}" type="number" class="form-input mt-1" value="${s.appliesEffect?.turns || 0}"></div>
+                        <div><label class="block text-xs font-medium text-gray-400">턴당 값</label><input id="admin-effect-value-${s.id}" type="number" class="form-input mt-1" value="${s.appliesEffect?.value || 0}"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-between items-center mt-4 pt-4 border-t border-gray-700/50">
+                <button data-skill-id="${s.id}" class="save-skill-btn bg-green-600 p-2 text-sm flex-grow mr-2">저장</button>
+                <button data-skill-id="${s.id}" data-skill-name="${s.name}" class="delete-skill-btn bg-red-700 hover:bg-red-600 p-2 text-sm text-white">삭제</button>
+            </div>
+        `;
+    }
+
+    function getNewSkillFormHtml() {
+        return `
+            <div class="grid grid-cols-4 gap-3">
+                <div class="col-span-2"><label class="block text-xs font-medium text-gray-400">스킬 ID (고유값)</label><input id="new-skill-id" class="form-input mt-1"></div>
+                <div class="col-span-2"><label class="block text-xs font-medium text-gray-400">스킬 이름</label><input id="new-skill-name" class="form-input mt-1"></div>
+                <div><label class="block text-xs font-medium text-gray-400">분류</label><select id="new-skill-category" class="form-input mt-1 bg-gray-700">${SKILL_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select></div>
+                <div><label class="block text-xs font-medium text-gray-400">타입</label><select id="new-skill-type" class="form-input mt-1 bg-gray-700"><option value="Melee">Melee</option><option value="Ranged">Ranged</option><option value="Heal">Heal</option><option value="Utility">Utility</option><option value="Support">Support</option></select></div>
+                <div><label class="block text-xs font-medium text-gray-400">아이콘</label><input id="new-skill-icon" class="form-input mt-1"></div>
+                <div><label class="block text-xs font-medium text-gray-400">사거리 (칸)</label><input id="new-skill-range" type="number" class="form-input mt-1"></div>
+                <div><label class="block text-xs font-medium text-gray-400">계수 (배율)</label><input id="new-skill-multiplier" type="number" step="0.1" class="form-input mt-1"></div>
+                <div><label class="block text-xs font-medium text-gray-400">MP 비용</label><input id="new-skill-mpcost" type="number" class="form-input mt-1" value="0"></div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-600">
+                <h5 class="font-bold text-md mb-2 text-yellow-400">광역 스킬(AoE) 설정</h5>
+                <div class="grid grid-cols-3 gap-4 items-center">
+                    <div class="flex items-center gap-2"><input id="new-skill-isAoe" type="checkbox" class="form-checkbox h-5 w-5"><label for="new-skill-isAoe">광역 스킬 여부</label></div>
+                    <div><label class="block text-xs font-medium text-gray-400">광역 범위</label><input id="new-skill-aoeRange" type="number" class="form-input mt-1"></div>
+                    <div><label class="block text-xs font-medium text-gray-400">광역 형태</label><select id="new-skill-aoeShape" class="form-input mt-1 bg-gray-700"><option value="square">정사각형</option><option value="diamond">마름모</option></select></div>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-600">
+                <h5 class="font-bold text-md mb-2 text-cyan-400">지속 효과(DoT/HoT) 설정</h5>
+                <div class="flex items-center gap-2 mb-2"><input id="new-skill-hasEffect" type="checkbox" class="form-checkbox h-5 w-5"><label for="new-skill-hasEffect">이 스킬에 지속 효과 적용</label></div>
+                <div class="grid grid-cols-5 gap-3">
+                    <div><label class="block text-xs font-medium text-gray-400">효과 ID (고유값)</label><input id="new-skill-effect-id" class="form-input mt-1"></div>
+                    <div><label class="block text-xs font-medium text-gray-400">효과 이름</label><input id="new-skill-effect-name" class="form-input mt-1"></div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400">효과 종류</label>
+                        <select id="new-skill-effect-type" class="form-input mt-1 bg-gray-700">
+                            <option value="damage">피해(DoT)</option>
+                            <option value="heal">회복(HoT)</option>
+                        </select>
+                    </div>
+                    <div><label class="block text-xs font-medium text-gray-400">지속 턴</label><input id="new-skill-effect-turns" type="number" class="form-input mt-1"></div>
+                    <div><label class="block text-xs font-medium text-gray-400">턴당 값</label><input id="new-skill-effect-value" type="number" class="form-input mt-1"></div>
+                </div>
+            </div>
+            <button id="add-new-skill-btn" class="mt-4 bg-blue-600 p-2 w-full">새 스킬 저장</button>
+        `;
+    }
+
+    function getNewCharacterFormHtml() {
+        return `
+            <div class="grid grid-cols-2 gap-4">
+                <input id="new-char-name" placeholder="이름" class="form-input">
+                <select id="new-char-type" class="form-input bg-gray-700"><option value="PC">PC</option><option value="ENEMY">ENEMY</option></select>
+                <input id="new-char-imageUrl" placeholder="이미지 URL" class="form-input col-span-2">
+                <div class="relative"><input id="new-char-hp" type="number" placeholder=" " class="form-input peer" value="100"><label for="new-char-hp" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">HP (체력)</label></div>
+                <div class="relative"><input id="new-char-mp" type="number" placeholder=" " class="form-input peer" value="50"><label for="new-char-mp" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">MP (마나)</label></div>
+                <div class="relative"><input id="new-char-min-attack" type="number" placeholder=" " class="form-input peer" value="10"><label for="new-char-min-attack" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최소 공격력</label></div>
+                <div class="relative"><input id="new-char-max-attack" type="number" placeholder=" " class="form-input peer" value="15"><label for="new-char-max-attack" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최대 공격력</label></div>
+                <div class="relative"><input id="new-char-min-defense" type="number" placeholder=" " class="form-input peer" value="3"><label for="new-char-min-defense" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최소 방어력</label></div>
+                <div class="relative"><input id="new-char-max-defense" type="number" placeholder=" " class="form-input peer" value="7"><label for="new-char-max-defense" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">최대 방어력</label></div>
+                <div class="relative"><input id="new-char-size" type="number" placeholder=" " class="form-input peer" value="1"><label for="new-char-size" class="absolute left-3 -top-2 text-gray-400 text-xs transition-all peer-placeholder-shown:text-base peer-placeholder-shown:top-1/2 peer-focus:-top-2 peer-focus:text-xs">크기 (1x1, 2x2...)</label></div>
+                <input id="new-char-skills" placeholder="스킬 ID (e.g. slash,shoot)" class="form-input">
+            </div>
+            <button id="add-new-char-btn" class="mt-4 bg-blue-600 p-2 w-full">새 캐릭터 저장</button>
+        </div>`;
 
         adminModal.classList.remove('hidden');
     }
@@ -3102,161 +3373,166 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
     }
 
     async function handleCombatClick(e) {
-    const cell = e.target.closest('.cell');
-    if (!cell) return;
+        const cell = e.target.closest('.cell');
+        if (!cell) return;
 
-    // --- 💡 1. 클릭된 캐릭터를 찾는 로직 (수정됨) ---
-    const cellX = parseInt(cell.dataset.x);
-    const cellY = parseInt(cell.dataset.y);
-    const tokenOnCell = e.target.closest('.character-token');
-    let clickedChar = null; // 'let'으로 선언하여 재할당
+        const cellX = parseInt(cell.dataset.x);
+        const cellY = parseInt(cell.dataset.y);
+        
+        // =================================================================
+        // 👇 [핵심 수정] 캐릭터를 찾기 전에, 이동 단계인지 먼저 확인합니다.
+        // =================================================================
+        const clickedChar = characters.find(char => {
+            if (char.x === null) return false;
 
-    if (tokenOnCell) {
-        // 기본적으로 토큰이 감지되면 해당 캐릭터를 찾습니다. (주로 1x1 토큰이나 대형 토큰의 왼쪽 상단 칸)
-        clickedChar = characters.find(c => c.id === tokenOnCell.dataset.charId);
-    } else {
-        // 만약 토큰이 직접 감지되지 않았다면 (대형 토큰의 다른 부분을 클릭했다면),
-        // 클릭한 셀 좌표를 포함하는 대형 캐릭터가 있는지 직접 순회하여 찾습니다.
-        clickedChar = characters.find(c =>
-            c.x !== null &&
-            c.size > 1 &&
-            cellX >= c.x && cellX < (c.x + c.size) &&
-            cellY >= c.y && cellY < (c.y + c.size)
-        );
-    }
-    // clickedCharId를 여기서 한 번만 선언하여 오류를 해결합니다.
-    const clickedCharId = clickedChar ? clickedChar.id : null;
-    // --- 수정된 로직 끝 ---
-
-
-    // --- 💡 2. 기존 로직은 그대로 유지 ---
-    const previouslySelectedCharId = selectedCharacterId;
-    const selectedCharacter = characters.find(c => c.id === selectedCharacterId);
-    const currentTurnChar = characters[currentTurnIndex];
-    const isControllable = selectedCharacter && canControlCharacter(selectedCharacter.id);
-
-    if (e.detail === 2 && clickedChar) {
-        openProfileModal(clickedChar);
-        return;
-    }
-
-    // Phase 1: Selection/Start Move
-    if (clickedCharId && currentTurnChar?.id === clickedCharId && (isAdmin || loggedInCharId === clickedCharId)) {
-        selectedCharacterId = clickedCharId;
-
-        if (turnPhase === 'MOVE') {
-            const isClickOnMarker = e.target.closest('.turn-marker');
-            const isClickOnSelfCell = cellX >= clickedChar.x && cellX < (clickedChar.x + (clickedChar.size || 1)) &&
-                                      cellY >= clickedChar.y && cellY < (clickedChar.y + (clickedChar.size || 1));
-
-            if (isClickOnMarker || (isClickOnSelfCell && previouslySelectedCharId === clickedCharId)) {
-                turnPhase = 'ACTION';
-                selectedSkill = null;
-                preMovePosition = { x: clickedChar.x, y: clickedChar.y };
-                logAction(`⏩ ${clickedChar.name}이(가) 제자리 이동으로 단계를 건너뛰었습니다.`, "system");
-                render();
-                return;
+            // 만약 '이동 단계'이고, 지금 찾는 캐릭터가 '선택된 캐릭터'와 같다면,
+            // 클릭을 통과시켜야 하므로 '못 찾은 척' 합니다. (return false)
+            if (turnPhase === 'MOVE' && selectedCharacterId === char.id) {
+                return false;
             }
-        }
 
-        turnPhase = 'MOVE';
-        selectedSkill = 'move';
-        preMovePosition = { x: clickedChar.x, y: clickedChar.y };
-        render();
-        return;
-    }
+            const size = char.size || 1;
+            const isXMatch = cellX >= char.x && cellX < (char.x + size);
+            const isYMatch = cellY >= char.y && cellY < (char.y + size);
+            return isXMatch && isYMatch;
+        });
 
-    if (!isControllable) {
-        selectedCharacterId = null;
-        selectedSkill = null;
-        render();
-        return;
-    }
+        const clickedCharId = clickedChar ? clickedChar.id : null;
 
-    if (turnPhase === 'MOVE') {
-        const newX = parseInt(cell.dataset.x), newY = parseInt(cell.dataset.y);
-        const tileType = boardTiles[`${newX},${newY}`]?.type;
 
-        if (tileType === 'obstacle' && !isAdmin) {
-            showCustomModal("이동 불가", "이 칸은 장애물입니다. 이동할 수 없습니다.", [{ text: "확인", class: "bg-red-600" }]);
+        // --- 이 아래의 기존 로직은 모두 동일합니다 ---
+        const previouslySelectedCharId = selectedCharacterId;
+        const selectedCharacter = characters.find(c => c.id === selectedCharacterId);
+        const currentTurnChar = characters[currentTurnIndex];
+        const isControllable = selectedCharacter && canControlCharacter(selectedCharacter.id);
+
+        if (e.detail === 2 && clickedChar) {
+            openProfileModal(clickedChar);
             return;
         }
-        
-        if (cell.classList.contains('attack-range-move')) {
-            const isZeroMove = selectedCharacter.x === newX && selectedCharacter.y === newY;
-            await updateDoc(doc(db, 'games', gameId, 'characters', selectedCharacter.id), { x: newX, y: newY });
-            
-            if (isZeroMove) {
-                 logAction(`⏩ ${selectedCharacter.name}이(가) 제자리 이동했습니다.`, "move");
-            } else if (isAdmin) {
-                await logAction(`👮 관리자가 ${selectedCharacter.name}을(를) (${selectedCharacter.x},${selectedCharacter.y})에서 (${newX}, ${newY})로 이동했습니다.`, "admin-move");
-            } else {
-                await logAction(`🏃 ${selectedCharacter.name}이(가) (${newX}, ${newY})(으)로 이동했습니다.`, "move");
+
+        if (clickedCharId && currentTurnChar?.id === clickedCharId && (isAdmin || loggedInCharId === clickedCharId)) {
+            selectedCharacterId = clickedCharId;
+
+            if (turnPhase === 'MOVE') {
+                const isClickOnMarker = e.target.closest('.turn-marker');
+                const isClickOnSelfCell = cellX >= clickedChar.x && cellX < (clickedChar.x + (clickedChar.size || 1)) &&
+                                        cellY >= clickedChar.y && cellY < (clickedChar.y + (clickedChar.size || 1));
+
+                if (isClickOnMarker || (isClickOnSelfCell && previouslySelectedCharId === clickedCharId)) {
+                    turnPhase = 'ACTION';
+                    selectedSkill = null;
+                    preMovePosition = { x: clickedChar.x, y: clickedChar.y };
+                    logAction(`⏩ ${clickedChar.name}이(가) 제자리 이동으로 단계를 건너뛰었습니다.`, "system");
+                    render();
+                    return;
+                }
             }
-            
-            turnPhase = 'ACTION'; 
+
+            turnPhase = 'MOVE';
+            selectedSkill = 'move';
+            preMovePosition = { x: clickedChar.x, y: clickedChar.y };
+            render();
+            return;
+        }
+
+        if (!isControllable) {
+            selectedCharacterId = null;
             selectedSkill = null;
             render();
-        }
-    } else if (turnPhase === 'ACTION') {
-        const skill = SKILLS[selectedSkill];
-        if (!skill) {
-            showCustomModal("행동 필요", "사용할 스킬을 선택해 주세요.", [{ text: "확인", class: "bg-yellow-600" }]);
             return;
         }
 
-        const isAttackSkill = skill.category === 'Attack';
-        const isHealOrSupport = skill.category === 'Heal' || skill.category === 'Support';
-        
-        if (isAttackSkill) {
-            if (selectedCharacter.mp < skill.mpCost) {
-                await logAction(`⚠️ ${selectedCharacter.name}이(가) 마나가 부족하여 ${skill.name}을(를) 시전하지 못했습니다.`, "system");
-                render();
+        if (turnPhase === 'MOVE') {
+            if (selectedCharacter.statusEffects && selectedCharacter.statusEffects.some(e => e.id === 'rooted')) {
+                const rootedEffect = selectedCharacter.statusEffects.find(e => e.id === 'rooted');
+                showCustomModal("이동 불가", `[${rootedEffect.name}] 효과를 받아 움직일 수 없습니다.`, [{ text: "확인", class: "bg-red-600" }]);
+                return;
+            }
+
+            const newX = parseInt(cell.dataset.x), newY = parseInt(cell.dataset.y);
+            const tileType = boardTiles[`${newX},${newY}`]?.type;
+
+            if (tileType === 'obstacle' && !isAdmin) {
+                showCustomModal("이동 불가", "이 칸은 장애물입니다. 이동할 수 없습니다.", [{ text: "확인", class: "bg-red-600" }]);
                 return;
             }
             
-            if (skill.isAoe) {
-                if (cell.classList.contains('attack-range-skill')) {
-                    await executeSkill(selectedCharacter, { x: parseInt(cell.dataset.x), y: parseInt(cell.dataset.y) }, selectedSkill);
+            if (cell.classList.contains('attack-range-move')) {
+                const isZeroMove = selectedCharacter.x === newX && selectedCharacter.y === newY;
+                await updateDoc(doc(db, 'games', gameId, 'characters', selectedCharacter.id), { x: newX, y: newY });
+                
+                if (isZeroMove) {
+                    logAction(`⏩ ${selectedCharacter.name}이(가) 제자리 이동했습니다.`, "move");
+                } else if (isAdmin) {
+                    await logAction(`👮 관리자가 ${selectedCharacter.name}을(를) (${selectedCharacter.x},${selectedCharacter.y})에서 (${newX}, ${newY})로 이동했습니다.`, "admin-move");
+                } else {
+                    await logAction(`🏃 ${selectedCharacter.name}이(가) (${newX}, ${newY})(으)로 이동했습니다.`, "move");
                 }
-            } else if (clickedChar) {
-                const targetChar = clickedChar;
-                if (selectedCharacter.type !== targetChar.type && cell.classList.contains('attack-range-skill')) {
-                    await executeSkill(selectedCharacter, targetChar, selectedSkill);
-                }
-            }
-        } else if (isHealOrSupport) {
-            if (selectedCharacter.mp < skill.mpCost || (skill.hpCost && selectedCharacter.hp <= skill.hpCost)) {
-                await logAction(`⚠️ ${selectedCharacter.name}이(가) 자원(MP/HP)이 부족하여 ${skill.name}을(를) 시전하지 못했습니다.`, "system");
+                
+                turnPhase = 'ACTION'; 
+                selectedSkill = null;
                 render();
+            }
+        } else if (turnPhase === 'ACTION') {
+            const skill = SKILLS[selectedSkill];
+            if (!skill) {
+                showCustomModal("행동 필요", "사용할 스킬을 선택해 주세요.", [{ text: "확인", class: "bg-yellow-600" }]);
                 return;
             }
+
+            const isAttackSkill = skill.category === 'Attack';
+            const isHealOrSupport = skill.category === 'Heal' || skill.category === 'Support';
             
-            if (skill.isAoe) {
-                if (cell.classList.contains('heal-range-skill')) {
-                    await executeSkill(selectedCharacter, { x: parseInt(cell.dataset.x), y: parseInt(cell.dataset.y) }, selectedSkill);
-                }
-            } else if (clickedChar) {
-                const targetChar = clickedChar;
-                
-                let isValidTarget = false;
-                if (skill.targetType === 'ALLY_DEAD') {
-                    if (selectedCharacter.type === targetChar.type && targetChar.hp <= 0 && cell.classList.contains('heal-range-skill')) {
-                        isValidTarget = true;
-                    }
-                } else if (skill.targetType === 'ALLY') {
-                     if (selectedCharacter.type === targetChar.type && targetChar.hp > 0 && cell.classList.contains('heal-range-skill')) {
-                        isValidTarget = true;
-                    }
+            if (isAttackSkill) {
+                if (selectedCharacter.mp < skill.mpCost) {
+                    await logAction(`⚠️ ${selectedCharacter.name}이(가) 마나가 부족하여 ${skill.name}을(를) 시전하지 못했습니다.`, "system");
+                    render();
+                    return;
                 }
                 
-                if (isValidTarget) {
-                    await executeSkill(selectedCharacter, targetChar, selectedSkill);
+                if (skill.isAoe) {
+                    if (cell.classList.contains('attack-range-skill')) {
+                        await executeSkill(selectedCharacter, { x: parseInt(cell.dataset.x), y: parseInt(cell.dataset.y) }, selectedSkill);
+                    }
+                } else if (clickedChar) {
+                    const targetChar = clickedChar;
+                    if (selectedCharacter.type !== targetChar.type && cell.classList.contains('attack-range-skill')) {
+                        await executeSkill(selectedCharacter, targetChar, selectedSkill);
+                    }
+                }
+            } else if (isHealOrSupport) {
+                if (selectedCharacter.mp < skill.mpCost || (skill.hpCost && selectedCharacter.hp <= skill.hpCost)) {
+                    await logAction(`⚠️ ${selectedCharacter.name}이(가) 자원(MP/HP)이 부족하여 ${skill.name}을(를) 시전하지 못했습니다.`, "system");
+                    render();
+                    return;
+                }
+                
+                if (skill.isAoe) {
+                    if (cell.classList.contains('heal-range-skill')) {
+                        await executeSkill(selectedCharacter, { x: parseInt(cell.dataset.x), y: parseInt(cell.dataset.y) }, selectedSkill);
+                    }
+                } else if (clickedChar) {
+                    const targetChar = clickedChar;
+                    
+                    let isValidTarget = false;
+                    if (skill.targetType === 'ALLY_DEAD') {
+                        if (selectedCharacter.type === targetChar.type && targetChar.hp <= 0 && cell.classList.contains('heal-range-skill')) {
+                            isValidTarget = true;
+                        }
+                    } else if (skill.targetType === 'ALLY') {
+                        if (selectedCharacter.type === targetChar.type && targetChar.hp > 0 && cell.classList.contains('heal-range-skill')) {
+                            isValidTarget = true;
+                        }
+                    }
+                    
+                    if (isValidTarget) {
+                        await executeSkill(selectedCharacter, targetChar, selectedSkill);
+                    }
                 }
             }
         }
-    }
-}
+    } 
 
     async function gameBoardClick(e) {
         if(!gameId) return;
@@ -3412,7 +3688,93 @@ updates.isAuto = document.getElementById('edit-is-auto').checked;
             }
         }
     });
+ async function saveSettingsToFile() {
+        if (!gameId) return;
 
+        // 1. 저장할 모든 데이터를 하나의 객체로 모읍니다.
+        const settingsToSave = {
+            gameSettings: {
+                skills: SKILLS,
+                maxRounds: maxRounds,
+                boardBackgroundImage: boardBackgroundImage,
+                pageBackgroundImage: pageBackgroundImage,
+                isAdminMoveAllowed: isAdminMoveAllowed
+            },
+            boardTiles: boardTiles,
+            characters: characters.map(({ id, ...char }) => char) // id는 Firestore에서 자동 생성되므로 제외
+        };
+
+        // 2. 객체를 JSON 문자열로 변환합니다.
+        const jsonString = JSON.stringify(settingsToSave, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        // 3. 가상의 링크를 만들어 다운로드를 실행합니다.
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        a.download = `game-settings-${gameId}-${timestamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        await logAction("💾 관리자가 현재 게임 설정을 파일로 저장했습니다.", "admin");
+    }
+
+    // 👇 [새로 추가] 파일에서 설정을 불러와 게임에 적용하는 함수
+    async function loadSettingsFromFile(file) {
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const settings = JSON.parse(e.target.result);
+
+                // 파일 유효성 검사
+                if (!settings.gameSettings || !settings.boardTiles || !settings.characters) {
+                    throw new Error("올바르지 않은 설정 파일 형식입니다.");
+                }
+
+                showCustomModal("설정 불러오기 확인", "정말로 파일에서 설정을 불러오시겠습니까? 현재 게임의 모든 캐릭터, 스킬, 맵 설정이 파일의 내용으로 **완전히 교체**됩니다. 이 작업은 되돌릴 수 없습니다.", [
+                    { text: "취소", class: "bg-gray-600" },
+                    { text: "확인 (덮어쓰기)", class: "bg-red-600", onClick: async () => {
+                        
+                        // 1. 기존 캐릭터 데이터를 모두 삭제합니다.
+                        const charCollectionRef = collection(db, "games", gameId, "characters");
+                        const snapshot = await getDocs(charCollectionRef);
+                        const deleteBatch = writeBatch(db);
+                        snapshot.docs.forEach(doc => deleteBatch.delete(doc.ref));
+                        await deleteBatch.commit();
+
+                        // 2. 파일에서 읽어온 새 캐릭터 데이터를 추가합니다.
+                        const addBatch = writeBatch(db);
+                        settings.characters.forEach(charData => {
+                            const newCharRef = doc(collection(db, "games", gameId, "characters"));
+                            addBatch.set(newCharRef, charData);
+                        });
+                        await addBatch.commit();
+
+                        // 3. 나머지 게임 설정을 업데이트합니다.
+                        const gameDocRef = doc(db, 'games', gameId);
+                        await updateDoc(gameDocRef, settings.gameSettings);
+
+                        // 4. 맵 타일 정보를 업데이트합니다.
+                        const boardDocRef = doc(db, 'games', gameId, 'board', 'tiles');
+                        await setDoc(boardDocRef, { tiles: settings.boardTiles });
+
+                        await logAction("📂 관리자가 파일에서 게임 설정을 불러왔습니다. 모든 데이터가 교체되었습니다.", "admin");
+                        showCustomModal("성공", "설정을 성공적으로 불러왔습니다. 페이지가 새로고침됩니다.", [{text: "확인", class: "bg-green-600", onClick: () => location.reload()}]);
+                    }}
+                ]);
+
+            } catch (error) {
+                console.error("설정 파일 불러오기 실패:", error);
+                showCustomModal("오류", "설정 파일을 읽는 중 오류가 발생했습니다. 파일이 손상되었거나 형식이 올바르지 않습니다.", [{text: "확인", class: "bg-red-600"}]);
+            }
+        };
+        reader.readAsText(file);
+    }
     const applyTheme = (theme) => {
         document.documentElement.classList.toggle('light', theme === 'light');
         // Re-render to ensure scrollbars update correctly on theme change (due to CSS variable change)
