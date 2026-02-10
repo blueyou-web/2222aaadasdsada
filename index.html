@@ -256,7 +256,67 @@
         <main class="flex-1 flex flex-col relative bg-neutral-950 overflow-hidden">
             <div id="content-area" class="flex-1 relative flex flex-col h-full overflow-y-auto"></div>
         </main>
+<div id="discovery-panel" class="hidden fixed inset-0 z-[160] flex flex-col justify-end pointer-events-none transition-all duration-500">
+    
+    <div class="absolute inset-0 flex justify-center items-end pointer-events-none overflow-hidden">
+        <img id="discovery-npc" src="" class="h-[90vh] w-auto object-contain transition-all duration-1000 opacity-0 transform translate-y-20 scale-105">
+    </div>
 
+    <div class="w-full h-2/3 bg-gradient-to-t from-black via-black/40 to-transparent absolute bottom-0"></div>
+    
+    <div class="relative z-10 w-full max-w-6xl mx-auto px-12 pb-16 pointer-events-auto">
+        <div class="space-y-6">
+            <div id="discovery-name-box" class="inline-flex items-center gap-3">
+                <span class="w-1 h-6 bg-amber-500"></span>
+                <p id="discovery-name" class="text-amber-500 text-lg font-black tracking-widest uppercase italic drop-shadow-md">Name</p>
+            </div>
+            
+            <div class="relative group">
+                <p id="discovery-clue" class="text-white text-2xl md:text-3xl font-serif leading-relaxed break-keep drop-shadow-2xl max-w-4xl transition-all duration-300">
+                    대사 내용이 표시됩니다.
+                </p>
+            </div>
+
+            <div id="discovery-options" class="flex flex-col gap-3 mt-10 w-fit"></div>
+
+            <div class="flex justify-between items-center pt-8 border-t border-white/10 mt-6">
+                <div class="text-white/20 text-[10px] tracking-[0.8em] font-bold uppercase">Investigation System v3.0</div>
+                <button id="discovery-next-btn" class="group flex items-center gap-4 text-white hover:text-amber-500 transition-all">
+                    <span class="text-[10px] font-black tracking-widest uppercase opacity-40 group-hover:opacity-100">Click to Continue</span>
+                    <i data-lucide="chevron-right" class="w-5 h-5 animate-pulse"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="poi-editor-modal" class="hidden fixed inset-0 z-[170] bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
+    <div class="w-full max-w-2xl bg-neutral-900 border border-white/10 rounded-[2.5rem] p-8 shadow-2xl flex flex-col max-h-[90vh]">
+        <h3 class="text-xl font-black text-white mb-6 uppercase tracking-widest border-b border-white/5 pb-4 flex justify-between items-center">
+            Scenario Builder
+            <span class="text-[10px] text-amber-500 font-normal">블록을 추가하여 흐름을 만드세요</span>
+        </h3>
+        
+        <div class="mb-4">
+            <label class="text-[10px] text-neutral-500 font-bold uppercase ml-1">지점 타이틀</label>
+            <input id="edit-poi-title" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white text-sm mt-1 outline-none focus:border-amber-500">
+        </div>
+
+        <div id="timeline-container" class="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-3 min-h-[300px]">
+            </div>
+
+        <div class="grid grid-cols-3 gap-2 mt-6 p-4 bg-white/5 rounded-2xl border border-white/5">
+            <button onclick="addTimelineBlock('npc')" class="py-3 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-black rounded-xl border border-blue-600/30 transition-all">+ NPC 대사 추가</button>
+            <button onclick="addTimelineBlock('monologue')" class="py-3 bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 text-[10px] font-black rounded-xl border border-purple-600/30 transition-all">+ 나의 독백 추가</button>
+            <button onclick="addTimelineBlock('choice')" class="py-3 bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 text-[10px] font-black rounded-xl border border-amber-600/30 transition-all">+ 선택지 추가</button>
+        </div>
+
+        <div class="flex gap-3 mt-6">
+            <button onclick="savePOITimeline()" class="flex-1 py-4 bg-amber-600 text-white font-black rounded-xl text-[10px] uppercase shadow-xl hover:bg-amber-700">Save Scenario</button>
+            <button onclick="document.getElementById('poi-editor-modal').classList.add('hidden')" class="px-8 py-4 bg-neutral-800 text-neutral-500 font-bold rounded-xl text-[10px] uppercase">Cancel</button>
+        </div>
+    </div>
+</div>
         <!-- Toast -->
         <div id="toast" class="hidden fixed bottom-8 left-1/2 -translate-x-1/2 z-[150]">
             <div class="bg-amber-600 text-white px-8 py-4 rounded-2xl shadow-2xl font-black text-[10px] tracking-widest uppercase flex items-center gap-3 border border-amber-400/20 modal-enter">
@@ -309,6 +369,7 @@
             investigation: {
     selectedSector: null, // 현재 유저가 들어간 구역 ID
         foundClueIds: [],      // 유저가 발견한 단서들
+        logs: [],
         viewedClueIds: [],     // 전문을 확인한 단서들 (NEW 표시 제거용)
         sectors: [
             { id: 'academy', name: '아카데미', map: 'https://images.unsplash.com/photo-1523050853061-80e8a4ff147e?q=80&w=2000', desc: '금지된 지식이 잠든 곳', unlockDate: '11월 12일', isAvailable: true },
@@ -1877,66 +1938,189 @@ window.changeMapImage = async (sectorIdx) => {
         showToast(`${sector.name} 지도가 업데이트되었습니다.`);
     }
 };
+// --- 핵심 관리 변수 ---
+let currentEditingIdx = null;
+let playIndex = 0;
+let activeTimeline = [];
 
-// 2. 포인트 수정 함수 (globalIdx 사용)
-window.editPOI = async (globalIdx) => {
+// --- [해결] 블록 추가 함수를 전역(window)에 확실히 등록 ---
+window.addTimelineBlock = function(type, data = {}) {
+    const container = document.getElementById('timeline-container');
+    if (!container) {
+        console.error("에디터 컨테이너(timeline-container)를 찾을 수 없습니다.");
+        return;
+    }
+
+    const block = document.createElement('div');
+    block.className = `p-4 rounded-2xl border timeline-block animate-fade-in relative bg-white/5 mb-3`;
+    block.dataset.type = type;
+
+    let inner = `<button onclick="this.parentElement.remove()" class="absolute top-2 right-3 text-white/20 hover:text-red-500 text-lg">×</button>`;
+
+    if (type === 'npc') {
+        inner += `
+            <div class="space-y-2">
+                <span class="text-[9px] font-black text-blue-400 uppercase">NPC Dialogue</span>
+                <input placeholder="화자 이름" class="blk-name w-full bg-black/40 border-none rounded-lg p-2 text-xs text-white" value="${data.name || ''}">
+                <input placeholder="이미지 URL" class="blk-img w-full bg-black/40 border-none rounded-lg p-2 text-[10px] text-white/40" value="${data.img || ''}">
+                <textarea placeholder="대사 내용" class="blk-text w-full bg-black/40 border-none rounded-lg p-2 text-xs text-white h-16 resize-none">${data.text || ''}</textarea>
+            </div>`;
+    } else if (type === 'monologue') {
+        inner += `
+            <div class="space-y-2">
+                <span class="text-[9px] font-black text-purple-400 uppercase">Monologue</span>
+                <textarea placeholder="나의 독백 내용" class="blk-text w-full bg-black/40 border-none rounded-lg p-2 text-xs text-purple-200 h-16 resize-none">${data.text || ''}</textarea>
+            </div>`;
+    } else if (type === 'choice') {
+        inner += `
+            <div class="space-y-2">
+                <span class="text-[9px] font-black text-amber-400 uppercase">Decision Point</span>
+                <input placeholder="선택지 1" class="blk-opt1 w-full bg-black/40 border-none rounded-lg p-2 text-xs text-amber-500" value="${data.opt1 || ''}">
+                <textarea placeholder="결과 대사 1" class="blk-res1 w-full bg-black/40 border-none rounded-lg p-2 text-[10px] text-white/60 h-10">${data.res1 || ''}</textarea>
+                <input placeholder="선택지 2" class="blk-opt2 w-full bg-black/40 border-none rounded-lg p-2 text-xs text-amber-500" value="${data.opt2 || ''}">
+                <textarea placeholder="결과 대사 2" class="blk-res2 w-full bg-black/40 border-none rounded-lg p-2 text-[10px] text-white/60 h-10">${data.res2 || ''}</textarea>
+            </div>`;
+    }
+
+    block.innerHTML = inner;
+    container.appendChild(block);
+    container.scrollTop = container.scrollHeight;
+};
+window.editPOI = (globalIdx) => {
     if (!state.isAdmin) return;
-    
+    currentEditingIdx = globalIdx;
     const p = state.investigation.points[globalIdx];
-    const newTitle = prompt("수정할 지점 이름:", p.title);
-    if (!newTitle) return;
     
-    const newClue = prompt("수정할 단서 내용:", p.clue);
-    if (!newClue) return;
+    document.getElementById('edit-poi-title').value = p.title || "";
+    const container = document.getElementById('timeline-container');
+    container.innerHTML = ''; // 초기화
+    
+    if (p.timeline && p.timeline.length > 0) {
+        p.timeline.forEach(item => addTimelineBlock(item.type, item));
+    }
+    
+    document.getElementById('poi-editor-modal').classList.remove('hidden');
+};
+window.savePOITimeline = async () => {
+    if (currentEditingIdx === null) return;
+    
+    const blocks = document.querySelectorAll('.timeline-block');
+    const timeline = Array.from(blocks).map(blk => {
+        const type = blk.dataset.type;
+        const d = { type };
+        if (type === 'npc') {
+            d.name = blk.querySelector('.blk-name').value;
+            d.img = blk.querySelector('.blk-img').value;
+            d.text = blk.querySelector('.blk-text').value;
+        } else if (type === 'monologue') {
+            d.text = blk.querySelector('.blk-text').value;
+        } else if (type === 'choice') {
+            d.opt1 = blk.querySelector('.blk-opt1').value;
+            d.res1 = blk.querySelector('.blk-res1').value;
+            d.opt2 = blk.querySelector('.blk-opt2').value;
+            d.res2 = blk.querySelector('.blk-res2').value;
+        }
+        return d;
+    });
 
-    state.investigation.points[globalIdx].title = newTitle;
-    state.investigation.points[globalIdx].clue = newClue;
+    state.investigation.points[currentEditingIdx].title = document.getElementById('edit-poi-title').value;
+    state.investigation.points[currentEditingIdx].timeline = timeline;
     
     if (window.handleSystemUpdate) {
         await window.handleSystemUpdate();
-        showToast("Point updated & saved.");
     }
+    
+    document.getElementById('poi-editor-modal').classList.add('hidden');
     renderInvestigation();
+    showToast("시나리오가 저장되었습니다.");
+};
+
+window.savePOIEasy = async () => {
+    if (currentEditingIdx === null) return;
+    
+    // 1. 입력창에서 값 가져오기
+    const title = document.getElementById('edit-poi-title').value;
+    const clue = document.getElementById('edit-poi-clue').value;
+    const isInteractive = document.getElementById('edit-poi-interactive').checked;
+    const npcName = document.getElementById('edit-poi-npc-name').value;
+    const npcImage = document.getElementById('edit-poi-npc-image').value;
+
+    // 2. 선택지 배열 구성
+    const options = [];
+    const opt1Text = document.getElementById('edit-opt1-text').value;
+    if(opt1Text) {
+        options.push({ text: opt1Text, result: document.getElementById('edit-opt1-res').value });
+    }
+    const opt2Text = document.getElementById('edit-opt2-text').value;
+    if(opt2Text) {
+        options.push({ text: opt2Text, result: document.getElementById('edit-opt2-res').value });
+    }
+
+    // 3. 로컬 state 업데이트
+    state.investigation.points[currentEditingIdx] = {
+        ...state.investigation.points[currentEditingIdx], // 기존 ID, 좌표, 섹션 유지
+        title: title,
+        clue: clue,
+        isInteractive: isInteractive,
+        npcName: npcName,
+        npcImage: npcImage,
+        options: options
+    };
+    
+    // 4. 서버 동기화 및 UI 갱신
+    try {
+        if (window.handleSystemUpdate) {
+            await window.handleSystemUpdate(); // 여기서 서버로 실제 저장이 일어납니다.
+        }
+        document.getElementById('poi-editor-modal').classList.add('hidden');
+        renderInvestigation(); // 맵 위의 점들 다시 그리기
+        showToast("지점 정보가 성공적으로 수정되었습니다.");
+    } catch (e) {
+        console.error("Update Error:", e);
+        alert("저장 중 오류가 발생했습니다.");
+    }
+};
+
+window.savePOIJson = async () => {
+    try {
+        const newData = JSON.parse(document.getElementById('poi-json-input').value);
+        state.investigation.points[currentEditingIdx] = {
+            ...state.investigation.points[currentEditingIdx],
+            ...newData
+        };
+        await handleSystemUpdate();
+        document.getElementById('poi-editor-modal').classList.add('hidden');
+        renderInvestigation();
+        showToast("데이터가 서버에 저장되었습니다.");
+    } catch (e) {
+        alert("JSON 형식이 잘못되었습니다.");
+    }
 };
 window.handleMapClick = async (event) => {
     if (!state.isAdmin) return;
-    
-    // 클릭 타겟이 포인트 자체라면 중단
-    if (event.target.closest('[onclick^="handleDiscovery"]')) return;
+    if (event.target.closest('.clue-point')) return;
 
     const container = document.getElementById('map-container');
     const rect = container.getBoundingClientRect();
-
     const x = ((event.clientX - rect.left) / rect.width) * 100;
     const y = ((event.clientY - rect.top) / rect.height) * 100;
 
-    const title = prompt("조사 지점 이름:", "New Signal");
-    if (!title) return;
-
-    const clue = prompt("발견될 단서 내용:");
-    if (!clue) return;
-
-    // 새로운 포인트 객체 생성
     const newPoint = {
         id: 'p' + Date.now(),
-        sector: state.investigation.selectedSector, // [중요] 현재 접속 중인 섹터 ID를 반드시 저장
+        sector: state.investigation.selectedSector,
         x: parseFloat(x.toFixed(2)),
         y: parseFloat(y.toFixed(2)),
-        title: title,
-        clue: clue || "조사된 내용이 없습니다."
+        title: "새 조사 지점",
+        clue: "내용을 입력하세요.",
+        isInteractive: false,
+        options: []
     };
 
-    // 로컬 데이터에 추가
     state.investigation.points.push(newPoint);
-    
-    // 서버에 즉시 저장
-    await window.handleSystemUpdate(); 
-
-    // 화면 갱신 (점이 즉시 나타남)
-    renderInvestigation(); 
-    showToast("새로운 조사 지점이 서버에 기록되었습니다.");
+    await handleSystemUpdate();
+    renderInvestigation();
+    showToast("지점이 생성되었습니다. EDIT을 눌러 내용을 수정하세요.");
 };
-
 // 2. 포인트 우클릭 시 삭제 (관리자 전용)
 window.handlePointRightClick = (event, idx) => {
     if (!state.isAdmin) return;
@@ -2115,50 +2299,174 @@ window.loadUserInvestigationProgress = async () => {
     }
 };
 
-// 3. handleDiscovery 수정 (발견 시 우측 리스트 자동 갱신 포함)
-const originalDiscovery = window.handleDiscovery;
-window.handleDiscovery = async (id) => {
-    await originalDiscovery(id); // 기존 로직(저장, 팝업) 실행
-    updateInvestigationSideList(); // 우측 리스트 새로고침
-};
-window.handleDiscovery = async (id) => {
+window.handleDiscovery = (id) => {
     const point = state.investigation.points.find(p => p.id === id);
     if (!point) return;
 
-    // 발견 목록 초기화 확인
-    if (!state.investigation.foundClueIds) state.investigation.foundClueIds = [];
+    // 타임라인 데이터 가져오기 (없으면 빈 배열)
+    activeTimeline = point.timeline || [];
+    playIndex = 0;
     
-    // 처음 발견하는 경우만 저장 로직 실행
-    if (!state.investigation.foundClueIds.includes(id)) {
-        state.investigation.foundClueIds.push(id);
-        
-        try {
-            // [핵심] world 문서의 investigation 필드만 부분 업데이트
-            const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'global', 'world');
-            await updateDoc(worldRef, {
-                "investigation.foundClueIds": state.investigation.foundClueIds
-            });
-            showToast("New Evidence Archived.");
-        } catch (e) {
-            console.error("Save Error:", e);
-        }
-    }
-
-    window.playNotificationSound();
-
-    // 팝업 표시 (요소가 있는지 재확인 후 텍스트 삽입)
     const panel = document.getElementById('discovery-panel');
     if (panel) {
-        document.getElementById('discovery-title').innerText = `Signal: ${point.title}`;
-        document.getElementById('discovery-clue').innerText = `"${point.clue}"`;
         panel.classList.remove('hidden');
-        panel.classList.add('modal-enter');
+        
+        // 블록이 하나도 없을 경우 처리
+        if (activeTimeline.length === 0) {
+            document.getElementById('discovery-name').innerText = "시스템";
+            document.getElementById('discovery-clue').innerText = "아직 시나리오가 작성되지 않은 지점입니다.";
+            document.getElementById('discovery-next-btn').onclick = () => panel.classList.add('hidden');
+        } else {
+            playNextStep();
+        }
     }
-    
-    renderInvestigation(); // UI 갱신 (반짝임 끄기 등)
 };
 
-// [수정] 관리자용 포인트 조작 시 전체 저장
+function playNextStep() {
+    if (playIndex >= activeTimeline.length) {
+        const panel = document.getElementById('discovery-panel');
+        if (panel) panel.classList.add('hidden');
+        return;
+    }
+
+    const step = activeTimeline[playIndex];
+    const nameEl = document.getElementById('discovery-name');
+    const clueEl = document.getElementById('discovery-clue');
+    const npcImg = document.getElementById('discovery-npc');
+    const optionsEl = document.getElementById('discovery-options');
+    const nextBtn = document.getElementById('discovery-next-btn');
+
+    if (optionsEl) optionsEl.innerHTML = '';
+    if (nextBtn) nextBtn.classList.remove('hidden');
+
+    const triggerFadeIn = () => {
+        if (!clueEl) return;
+        clueEl.classList.remove('animate-fade-in');
+        void clueEl.offsetWidth;
+        clueEl.classList.add('animate-fade-in');
+    };
+
+    // --- [추가] 로그 기록 함수 ---
+    const recordToLog = (speaker, text) => {
+        if (!text) return;
+        // 기존에 만들어둔 addInvestigationLog 함수를 호출합니다.
+        if (typeof addInvestigationLog === 'function') {
+            addInvestigationLog(speaker, text);
+            // 우측 UI 리스트를 즉시 갱신합니다.
+            if (window.updateInvestigationSideList) window.updateInvestigationSideList();
+        }
+    };
+
+    if (step.type === 'npc' || step.type === 'monologue') {
+        const speakerName = step.name || (step.type === 'monologue' ? "나" : "???");
+        const message = step.text || "";
+
+        if (nameEl) nameEl.innerText = speakerName;
+        if (clueEl) {
+            clueEl.innerText = message;
+            triggerFadeIn();
+        }
+
+        // NPC 이미지 처리
+        if (npcImg) {
+            if (step.type === 'npc' && step.img) {
+                npcImg.src = step.img;
+                npcImg.style.opacity = "1";
+                npcImg.style.transform = "translateY(0)";
+            } else {
+                npcImg.style.opacity = "0";
+                npcImg.style.transform = "translateY(20px)";
+            }
+        }
+
+        // --- 실시간 로그 기록 ---
+        recordToLog(speakerName, message);
+
+        if (nextBtn) nextBtn.onclick = playNextStep;
+
+    } else if (step.type === 'choice') {
+        if (nextBtn) nextBtn.classList.add('hidden');
+        if (nameEl) nameEl.innerText = "선택지";
+        if (clueEl) clueEl.innerText = "선택을 기다리고 있습니다...";
+
+        [1, 2].forEach(i => {
+            const optText = step['opt' + i];
+            const resText = step['res' + i];
+            
+            if (optText) {
+                const btn = document.createElement('button');
+                btn.className = "w-full p-4 mb-3 bg-white/5 border border-white/10 rounded-xl text-left text-white text-sm hover:bg-white hover:text-black transition-all flex items-center gap-3 group";
+                btn.innerHTML = `<span class="w-1.5 h-1.5 bg-amber-500 rounded-full group-hover:scale-150 transition-transform"></span> ${optText}`;
+                
+                btn.onclick = () => {
+                    if (clueEl) {
+                        clueEl.innerText = resText || "";
+                        triggerFadeIn();
+                    }
+                    
+                    // --- 선택 결과 로그 기록 ---
+                    recordToLog(`선택: ${optText}`, resText);
+
+                    if (optionsEl) optionsEl.innerHTML = '';
+                    if (nextBtn) {
+                        nextBtn.classList.remove('hidden');
+                        nextBtn.onclick = playNextStep;
+                    }
+                };
+                if (optionsEl) optionsEl.appendChild(btn);
+            }
+        });
+    }
+
+    playIndex++;
+}
+
+// 선택지 표시 (세련된 애니메이션 버튼)
+function showOptions(point) {
+    const optionsEl = document.getElementById('discovery-options');
+    optionsEl.innerHTML = '';
+    
+    point.options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.className = "group relative px-10 py-4 bg-white/5 hover:bg-white text-white hover:text-black border border-white/20 rounded-full text-sm font-bold transition-all duration-300 transform hover:translate-x-4 flex items-center gap-4";
+        btn.innerHTML = `
+            <span class="w-2 h-2 bg-amber-500 rounded-full group-hover:scale-150 transition-transform"></span>
+            ${opt.text}
+        `;
+        btn.onclick = () => {
+            // 선택 결과도 대화창에 표시
+            document.getElementById('discovery-clue').innerText = opt.result;
+            optionsEl.innerHTML = '';
+            setTimeout(() => finishInvestigation(point), 2000);
+        };
+        optionsEl.appendChild(btn);
+    });
+}
+
+function finishInvestigation(point) {
+    // 기록 저장 및 종료 로직
+    let localFoundIds = JSON.parse(localStorage.getItem('my_found_clues') || "[]");
+    if (!localFoundIds.includes(point.id)) {
+        localFoundIds.push(point.id);
+        localStorage.setItem('my_found_clues', JSON.stringify(localFoundIds));
+    }
+    // "Close" 버튼 노출 혹은 자동 닫기
+    document.getElementById('discovery-next-btn').innerHTML = "Close Signal";
+    document.getElementById('discovery-next-btn').classList.remove('hidden');
+    document.getElementById('discovery-next-btn').onclick = () => {
+        document.getElementById('discovery-panel').classList.add('hidden');
+    };
+}
+
+function addInvestigationLog(title, text) {
+    if (!state.investigation.logs) state.investigation.logs = []; 
+    
+    state.investigation.logs.push({
+        title: title,
+        text: text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    });
+}
 window.saveInvestigationToDB = async () => {
     try {
         const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'global', 'world');
@@ -3273,15 +3581,15 @@ function renderInvestigation() {
                                         </div>
                                         
                                         <div class="absolute bottom-full mb-4 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 translate-y-2 group-hover:translate-y-0">
-                                            <div class="bg-neutral-900/90 backdrop-blur-md text-white text-[10px] font-black px-4 py-2 rounded-xl border border-amber-500/30 shadow-2xl flex items-center gap-3 pointer-events-auto">
-                                                <span class="tracking-widest">${p.title}</span>
-                                                ${state.isAdmin ? `
-                                                    <div class="flex gap-2 ml-2 border-l border-white/10 pl-2 text-[9px]">
-                                                        <button onclick="event.stopPropagation(); editPOI(${globalIdx})" class="text-amber-500 hover:text-white">EDIT</button>
-                                                        <button onclick="event.stopPropagation(); handlePointRightClick(event, ${globalIdx})" class="text-red-500 hover:text-white">DEL</button>
-                                                    </div>
-                                                ` : ''}
-                                            </div>
+<div class="bg-neutral-900/90 backdrop-blur-md text-white text-[10px] font-black px-4 py-2 rounded-xl border border-amber-500/30 shadow-2xl flex items-center gap-3 pointer-events-auto whitespace-nowrap w-max min-w-max">
+    <span class="tracking-widest inline-block">${p.title}</span>
+    ${state.isAdmin ? `
+        <div class="flex gap-2 ml-2 border-l border-white/10 pl-2 text-[9px] shrink-0">
+            <button onclick="event.stopPropagation(); editPOI(${globalIdx})" class="text-amber-500 hover:text-white">EDIT</button>
+            <button onclick="event.stopPropagation(); handlePointRightClick(event, ${globalIdx})" class="text-red-500 hover:text-white">DEL</button>
+        </div>
+    ` : ''}
+</div>
                                         </div>
                                     </div>`;
                             }).join('')}
@@ -3396,22 +3704,27 @@ window.updateInvestigationSideList = () => {
     const sideList = document.getElementById('investigation-side-list');
     if (!sideList) return;
 
-    const inv = state.investigation;
-    // 내가 발견한(foundClueIds) 단서들만 필터링
-    const foundClues = inv.points.filter(p => inv.foundClueIds.includes(p.id));
+    const logs = state.investigation.logs || [];
 
-    if (foundClues.length === 0) {
+    if (logs.length === 0) {
         sideList.innerHTML = '<p class="text-[10px] text-neutral-700 italic text-center py-10">NO LOGS FOUND.</p>';
         return;
     }
 
-    // 최신 발견 순으로 상단에 노출
-    sideList.innerHTML = foundClues.reverse().map(c => `
-        <div class="p-4 bg-white/5 border border-white/5 rounded-xl animate-fade-in group hover:border-amber-500/30 transition-all cursor-help" onclick="showFullClue('${c.id}')">
-            <p class="text-[9px] text-amber-500 font-black uppercase mb-1 tracking-widest">${c.title}</p>
-            <p class="text-[11px] text-neutral-400 line-clamp-2 leading-relaxed italic group-hover:text-neutral-200">"${c.clue}"</p>
+    // 최신 로그가 아래로 가게 하려면 reverse()를 빼고, 위로 가게 하려면 넣으세요.
+    // 비주얼 노벨 느낌은 최신 로그가 아래에 쌓이는 것이 일반적입니다.
+    sideList.innerHTML = logs.map(log => `
+        <div class="p-4 bg-white/5 border-l-2 border-amber-600/30 mb-2 animate-fade-in">
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-[9px] text-amber-500 font-black uppercase tracking-widest">${log.title}</span>
+                <span class="text-[8px] text-neutral-600">${log.time}</span>
+            </div>
+            <p class="text-xs text-neutral-300 leading-relaxed whitespace-pre-wrap">${log.text}</p>
         </div>
     `).join('');
+
+    // 로그가 추가될 때 자동으로 스크롤을 맨 아래로 내림
+    sideList.scrollTop = sideList.scrollHeight;
 };
     </script>
 </body>
