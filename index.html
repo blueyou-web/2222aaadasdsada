@@ -331,7 +331,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, updateDoc, deleteDoc, writeBatch, getDocs, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         // --- Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyB7XJPpZzfDbdDCsbzMVO9HTZqrpUlMX-Y",
@@ -347,6 +347,19 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        
+        // db와 auth를 전역으로 노출 (Combat Skills 편집기에서 사용)
+        window.db = db;
+        window.auth = auth;
+        
+        // Firestore 함수들도 전역으로 노출
+        window.collection = collection;
+        window.doc = doc;
+        window.getDoc = getDoc;
+        window.getDocs = getDocs;
+        window.updateDoc = updateDoc;
+        window.writeBatch = writeBatch;
+        window.setDoc = setDoc;
 
         const $ = (id) => document.getElementById(id);
 
@@ -383,6 +396,7 @@
         ]
     }
 };
+window.state = state;
 
         // --- App Lifecycle ---
         window.addEventListener('DOMContentLoaded', () => {
@@ -554,14 +568,23 @@ function subscribeToData() {
     });
 }
         function updateUserSession() {
-    if (!state.user) return;
+    console.log("🔄 updateUserSession 호출됨");
+    if (!state.user) {
+        console.log("❌ state.user 없음");
+        return;
+    }
+    
     const myAcc = state.accounts.find(a => a.uid === state.user.uid);
+    console.log("👤 내 계정 정보:", myAcc);
+    console.log("🎯 combatSkills:", myAcc?.combatSkills);
     state.userAccount = myAcc || { status: 'new' };
     
     if (myAcc && myAcc.status === 'approved') {
+        console.log("✅ 승인된 계정 - 메인 화면으로 이동");
         // [추가됨] 권한 체크: 'staff' 등급이면 관리자 권한 자동 부여
         if (myAcc.role === 'staff') {
             state.isAdmin = true;
+            console.log("🔑 관리자 권한 부여됨");
         }
 
         hideLoading();
@@ -572,14 +595,17 @@ function subscribeToData() {
         if (typeof updateMyNotifications === 'function') updateMyNotifications();
 
         if (!state.initDone) {
+            console.log("🎬 첫 로그인 - 사이드바 렌더링 및 홈 화면 전환");
             renderSidebarUI();
             switchView('home');
             state.initDone = true;
         }
     } else if (myAcc && myAcc.status === 'pending') {
+        console.log("⏳ 승인 대기 중");
         hideLoading();
         showPendingGateUI();
     } else {
+        console.log("🆕 신규 사용자");
         hideLoading();
         showAuthGate();
     }
@@ -1548,15 +1574,19 @@ window.handleCreateGroup = async () => {
         </div>
     </div>
 </div>
-<div class="mt-6 pt-4 border-t border-gray-700">
-    <div class="flex justify-between items-center mb-2">
-        <h4 class="text-[#D4B783] font-serif tracking-wider">COMBAT SKILLS</h4>
-        <button onclick="openSkillEditor()" class="text-xs border border-[#D4B783] text-[#D4B783] px-2 py-1 hover:bg-[#D4B783] hover:text-black transition">
-            EDIT SKILLS
+<div class="space-y-6 mt-6">
+    <div class="flex justify-between items-end border-b border-white/5 pb-2">
+        <h3 class="text-xs font-black text-amber-500 uppercase tracking-widest">Combat Skills</h3>
+        <button onclick="openSkillEditor()" class="text-[10px] font-bold text-neutral-500 hover:text-amber-500 transition-colors flex items-center gap-1">
+            <span>EDIT</span>
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
         </button>
     </div>
-    <div id="profile-equipped-skills" class="flex gap-2 flex-wrap min-h-[40px]">
-        <span class="text-gray-500 text-xs italic">No skills equipped.</span>
+    
+    <div id="profile-equipped-skills" class="grid grid-cols-5 gap-3 min-h-[42px]">
+        <div class="col-span-5 text-center py-3 border border-dashed border-white/10 rounded-xl">
+            <span class="text-[10px] text-neutral-600">No skills equipped</span>
+        </div>
     </div>
 </div>
                 <div class="space-y-6">
@@ -1582,6 +1612,16 @@ window.handleCreateGroup = async () => {
             </div>
         </div>
     `;
+    
+    // 프로필 렌더링 후 스킬 표시
+    const skills = oc.combatSkills || [];
+    console.log("📋 프로필 렌더링 - 최신 스킬 목록:", skills);
+    
+    if (typeof window.renderProfileSkills === 'function') {
+        window.renderProfileSkills(skills);
+    } else {
+        console.warn("⚠️ renderProfileSkills 함수가 정의되지 않음");
+    }
 }
 window.filterGroupMembers = () => {
     const input = document.getElementById('member-search-input');
@@ -1601,34 +1641,75 @@ window.filterGroupMembers = () => {
         }
     }
 };
-        window.handleUpdateProfile = async () => {
-    const data = { 
-        ocName: $('edit-name').value, 
-        profile: $('edit-profile').value, 
-        slogan: $('edit-slogan').value,
-        shortDesc: $('edit-shortDesc').value,
-        stats: $('edit-stats').value, 
-        badgeText: $('edit-badge').value,
-        // 티켓 링크 (개인)
-        linkText: $('edit-linkText').value,
-        linkUrl: $('edit-linkUrl').value,
-        // 키워드
-        keyword1: $('edit-kw1').value,
-        keyword2: $('edit-kw2').value,
-        keyword3: $('edit-kw3').value,
-    stat_hp: $('edit-stat-hp').value || "100",
-        stat_mp: $('edit-stat-mp').value || "50",
-        stat_atk: $('edit-stat-atk').value || "12 - 18",
-        stat_def: $('edit-stat-def').value || "3 - 7",
-        stat_move: $('edit-stat-move').value || "1"
+        window.handleUpdateProfile = async function() {
+    const user = auth.currentUser;
+    if (!user) { alert("로그인이 필요합니다."); return; }
+
+    // 1. 입력창에서 값 가져오기
+    const getVal = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.value.trim() : '';
     };
-    
+
+    // 2. 저장할 데이터 객체 만들기
+    // (여기서 skills는 제외하여 기존 스킬 데이터가 날아가지 않게 보호합니다)
+    const updateData = {
+        badgeText: getVal('edit-badge'),
+        ocName: getVal('edit-name'),
+        profile: getVal('edit-profile'),
+        slogan: getVal('edit-slogan'),
+        shortDesc: getVal('edit-shortDesc'),
+        linkText: getVal('edit-linkText'),
+        linkUrl: getVal('edit-linkUrl'),
+        stat_hp: getVal('edit-stat-hp'),
+        stat_mp: getVal('edit-stat-mp'),
+        stat_atk: getVal('edit-stat-atk'),
+        stat_def: getVal('edit-stat-def'),
+        stat_move: getVal('edit-stat-move'),
+        keyword1: getVal('edit-kw1'),
+        keyword2: getVal('edit-kw2'),
+        keyword3: getVal('edit-kw3'),
+        stats: getVal('edit-stats'),
+        updatedAt: new Date()
+    };
+
+    if (!updateData.ocName) {
+        alert("Personnel Name은 필수 입력값입니다.");
+        return;
+    }
+
     try {
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', state.userAccount.loginId), data, { merge: true });
-        Object.assign(state.userAccount, data);
-        showToast("Record Synchronized.");
-    } catch(e) { console.error(e); }
-};
+        // 3. [핵심 수정] 저장 경로를 홈페이지가 읽는 artifacts 경로로 변경
+        // state.userAccount.loginId가 있는지 확인합니다.
+        const loginId = window.state?.userAccount?.loginId || user.uid;
+        const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+        
+        const btn = document.querySelector('button[onclick="handleUpdateProfile()"]');
+        if(btn) btn.innerText = "UPDATING...";
+
+        // 4. [핵심 수정] updateDoc 대신 setDoc(merge: true) 사용
+        // 이렇게 하면 문서가 없으면 생성하고, 있으면 기존 데이터(스킬 등)를 유지하며 덮어씁니다.
+        await setDoc(userRef, updateData, { merge: true });
+        
+        // 5. 로컬 state 업데이트
+        if (window.state && window.state.userAccount) {
+            window.state.userAccount = { ...window.state.userAccount, ...updateData };
+        }
+
+        alert("프로필이 성공적으로 업데이트되었습니다.");
+        
+        if (typeof renderProfile === 'function') {
+            renderProfile(); 
+        }
+
+    } catch (e) {
+        console.error("프로필 저장 실패:", e);
+        alert("저장 중 오류가 발생했습니다: " + e.message);
+    } finally {
+        const btn = document.querySelector('button[onclick="handleUpdateProfile()"]');
+        if(btn) btn.innerText = "Authorize Update";
+    }
+}
         function renderAdmin() {
     // 1. 관리자 로그인 화면 (권한 없을 시)
     if (!state.isAdmin) {
@@ -1695,7 +1776,14 @@ window.filterGroupMembers = () => {
                 </div>
                 <button onclick="handleSystemUpdate()" class="w-full py-4 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-2xl uppercase tracking-widest text-xs shadow-xl transition-all">Update System Interface</button>
             </section>
-
+<div class="p-6 bg-neutral-900 border border-white/5 rounded-3xl space-y-4">
+    <p class="text-amber-500 font-bold uppercase text-xs">Skill Synchronization</p>
+    <input type="file" id="skill-file-input" class="hidden" accept=".json" onchange="importSkillsFromFile(event)">
+    <button onclick="document.getElementById('skill-file-input').click()" 
+            class="w-full py-3 bg-neutral-800 text-white text-[10px] font-black uppercase rounded-xl">
+        Upload Skill Backup (.json)
+    </button>
+</div>
             <section class="space-y-8">
                 <div class="flex justify-between items-end">
                     <h3 class="text-xs font-black uppercase text-neutral-400 border-l-8 border-purple-500 pl-6 tracking-[0.5em]">Class / Position Settings</h3>
@@ -4393,11 +4481,21 @@ window.openRaidBoard = function() {
     const statAtk = userAccount.stat_atk || '5-10';
     const statDef = userAccount.stat_def || '2-5';
     const statMove = userAccount.stat_move || '3';
+    const mySkills = userAccount.combatSkills || ['move', 'slash']; // 없으면 기본값
+    const skillParam = encodeURIComponent(mySkills.join(','));
+    let rawSkills = ['move', 'slash', 'heal']; // 기본값
     
-    // ▼ [추가됨] 스킬 목록 가져오기 (없으면 기본값 설정)
-    // DB에 저장된 배열을 가져와서 콤마(,)로 연결된 문자열로 변환합니다.
-    const rawSkills = userAccount.combatSkills || ['move', 'slash', 'heal'];
-    const skillParam = encodeURIComponent(rawSkills.join(','));
+    // userAccount가 존재하고 combatSkills가 배열이면 사용
+    if (userAccount && Array.isArray(userAccount.combatSkills) && userAccount.combatSkills.length > 0) {
+        rawSkills = userAccount.combatSkills;
+    }
+    
+    
+    console.log("🎮 레이드 보드 열기:", {
+        userId,
+        ocName: decodeURIComponent(ocName),
+        skills: rawSkills
+    });
     
     // game_board.html에 유저 정보 전달 (맨 뒤에 &skills=... 추가됨)
     iframe.src = `game_board.html?userId=${userId}&fromHomepage=true&userName=${ocName}&userImage=${ocImage}&statHp=${statHp}&statMp=${statMp}&statAtk=${encodeURIComponent(statAtk)}&statDef=${encodeURIComponent(statDef)}&statMove=${statMove}&skills=${skillParam}`;
@@ -4414,126 +4512,219 @@ window.closeRaidBoard = function() {
 }
 let myEquippedSkills = []; // 현재 장착 중인 스킬 ID 목록
 
-// 1. 스킬 편집기 열기
-async function openSkillEditor() {
-    if (!auth.currentUser) {
-        alert("로그인이 필요합니다.");
-        return;
-    }
+window.openSkillEditor = async function() {
+    const user = (window.state && window.state.user) || auth.currentUser;
+    if (!user) { alert("로그인이 필요합니다."); return; }
     
     document.getElementById('skill-edit-modal').classList.remove('hidden');
-    
-    // DB에서 내 스킬 정보와 전체 스킬 목록 가져오기
     await loadSkillData();
 }
 
 // 2. 스킬 편집기 닫기
-function closeSkillEditor() {
+window.closeSkillEditor = function() {
     document.getElementById('skill-edit-modal').classList.add('hidden');
 }
 
-// 3. 데이터 로드 및 렌더링
+// 3. 데이터 로드 및 렌더링 (관리자 UI 포함)
 async function loadSkillData() {
     const libraryList = document.getElementById('skill-library-list');
     const equippedList = document.getElementById('equipped-skill-list');
-    
-    libraryList.innerHTML = '<div class="text-gray-500 text-center">Loading...</div>';
+    const user = (window.state && window.state.user) || auth.currentUser;
+
+    libraryList.innerHTML = '<div class="text-gray-500 text-center text-xs py-4">Loading...</div>';
     equippedList.innerHTML = '';
     
-    // A. 전체 스킬 가져오기
-    const libSnapshot = await db.collection('skillLibrary').get();
-    const allSkills = {};
-    libSnapshot.forEach(doc => allSkills[doc.id] = doc.data());
+    try {
+        // A. 관리자 여부 확인 (state.userAccount 활용)
+        // (주의: 실제 운영 시엔 DB의 role 필드를 체크하는 것이 더 안전함)
+        const isAdmin = window.state?.userAccount?.role === 'admin' || window.state?.userAccount?.isAdmin === true; 
 
-    // B. 내 정보 가져오기 (이미 장착한 스킬 확인)
-    const userDoc = await db.collection('users').doc(auth.currentUser.uid).get();
-    const userData = userDoc.data();
-    myEquippedSkills = userData.combatSkills || ['move', 'slash']; // 기본값
-
-    // C. 렌더링
-    libraryList.innerHTML = '';
-    
-    // 장착된 스킬 렌더링
-    myEquippedSkills.forEach(skillId => {
-        const skill = allSkills[skillId];
-        if(skill) createSkillElement(skill, equippedList);
-    });
-
-    // 미장착 스킬(라이브러리) 렌더링
-    Object.keys(allSkills).forEach(skillId => {
-        if (!myEquippedSkills.includes(skillId)) {
-            createSkillElement(allSkills[skillId], libraryList);
+        // B. 관리자라면 '스킬 추가 폼'을 상단에 표시
+        let adminHtml = '';
+        if (isAdmin) {
+            adminHtml = `
+                <div class="mb-4 p-3 bg-white/5 border border-amber-500/30 rounded">
+                    <p class="text-[10px] text-amber-500 font-bold mb-2 uppercase">Admin: Add New Skill</p>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <input id="new-skill-name" placeholder="스킬 이름 (예: 화염구)" class="bg-black text-white text-xs p-2 border border-white/10 rounded">
+                        <input id="new-skill-id" placeholder="ID (영문, 예: fireball)" class="bg-black text-white text-xs p-2 border border-white/10 rounded">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <input id="new-skill-icon" placeholder="아이콘 (예: 🔥)" class="bg-black text-white text-xs p-2 border border-white/10 rounded">
+                        <select id="new-skill-type" class="bg-black text-white text-xs p-2 border border-white/10 rounded">
+                            <option value="Attack">Attack</option>
+                            <option value="Heal">Heal</option>
+                            <option value="Utility">Utility</option>
+                            <option value="Support">Support</option>
+                        </select>
+                    </div>
+                    <button onclick="addNewSkillToLibrary()" class="w-full bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-1 rounded transition">
+                        + ADD TO LIBRARY
+                    </button>
+                </div>
+                <div class="border-b border-white/10 mb-2"></div>
+            `;
         }
-    });
-    
-    updateSkillCount();
+
+        // C. DB에서 스킬 목록 가져오기
+        const libSnapshot = await getDocs(collection(db, 'skillLibrary'));
+        const allSkills = {};
+        libSnapshot.forEach(doc => allSkills[doc.id] = doc.data());
+
+        // D. 내 장착 정보 가져오기
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        const userData = userDocSnap.data() || {};
+        const myEquippedSkills = userData.combatSkills || []; 
+
+        // E. 화면 그리기
+        // 1) 라이브러리 (왼쪽)
+        libraryList.innerHTML = adminHtml; // 관리자 폼 먼저 넣고
+
+        const sortedSkillIds = Object.keys(allSkills).sort(); // 가나다순 정렬
+        
+        if (sortedSkillIds.length === 0 && !isAdmin) {
+             libraryList.innerHTML += '<div class="text-gray-600 text-center text-xs py-4">등록된 스킬이 없습니다.<br>관리자에게 문의하세요.</div>';
+        }
+
+        sortedSkillIds.forEach(skillId => {
+            // 내가 장착하지 않은 것만 왼쪽에 표시
+            if (!myEquippedSkills.includes(skillId)) {
+                createSkillElement(allSkills[skillId], libraryList);
+            }
+        });
+
+        // 2) 장착 목록 (오른쪽)
+        myEquippedSkills.forEach(skillId => {
+            const skill = allSkills[skillId];
+            if(skill) {
+                createSkillElement(skill, equippedList);
+            } else {
+                // DB에는 없는데 내 목록엔 있는 경우 (삭제된 스킬 등) - 텍스트로라도 표시
+                createSkillElement({ id: skillId, name: skillId, icon: '❓', type: 'Unknown' }, equippedList);
+            }
+        });
+        
+        updateSkillCount();
+
+    } catch (error) {
+        console.error("스킬 로드 오류:", error);
+        libraryList.innerHTML = `<div class="text-red-500 text-center text-xs">Error: ${error.message}</div>`;
+    }
 }
 
-// 4. 스킬 엘리먼트 생성 (HTML)
+// 4. [관리자용] 새 스킬 DB에 등록하기
+window.addNewSkillToLibrary = async function() {
+    const name = document.getElementById('new-skill-name').value.trim();
+    const id = document.getElementById('new-skill-id').value.trim();
+    const icon = document.getElementById('new-skill-icon').value.trim();
+    const type = document.getElementById('new-skill-type').value;
+
+    if (!name || !id || !icon) {
+        alert("모든 필드를 입력해주세요.");
+        return;
+    }
+
+    try {
+        await setDoc(doc(db, 'skillLibrary', id), {
+            id: id,
+            name: name,
+            icon: icon,
+            type: type,
+            desc: name // 설명은 일단 이름과 동일하게
+        });
+        
+        alert(`스킬 [${name}] 등록 완료!`);
+        await loadSkillData(); // 목록 새로고침
+    } catch (e) {
+        console.error(e);
+        alert("등록 실패: " + e.message);
+    }
+}
+
+// 5. 스킬 엘리먼트 생성 UI
 function createSkillElement(skill, container) {
     const div = document.createElement('div');
-    div.className = 'skill-item';
+    div.className = 'skill-item group';
     div.draggable = true;
     div.id = `skill-${skill.id}`;
     div.dataset.skillId = skill.id;
     
+    // 삭제 버튼 (관리자일 경우 라이브러리 목록에서만 보임)
+    const isAdmin = window.state?.userAccount?.role === 'admin';
+    const isLibrary = container.id === 'skill-library-list';
+    let deleteBtn = '';
+    
+    if (isAdmin && isLibrary) {
+        deleteBtn = `<button onclick="deleteSkillFromLibrary('${skill.id}', event)" class="text-gray-600 hover:text-red-500 ml-2 p-1" title="스킬 삭제">✕</button>`;
+    }
+
     div.innerHTML = `
-        <span class="skill-icon">${skill.icon}</span>
-        <div class="skill-info">
-            <div class="skill-name">${skill.name}</div>
-            <div class="skill-type">${skill.type}</div>
+        <span class="skill-icon text-base">${skill.icon}</span>
+        <div class="skill-info flex flex-col min-w-0">
+            <div class="skill-name text-xs font-bold text-gray-200 truncate">${skill.name}</div>
+            <div class="skill-type text-[9px] text-gray-500 uppercase tracking-wider">${skill.type}</div>
         </div>
-        <div class="text-gray-600 text-xs">≡</div>
+        ${deleteBtn}
+        <div class="text-gray-600 text-xs cursor-move ml-auto">≡</div>
     `;
     
-    // 드래그 이벤트 연결
-    div.addEventListener('dragstart', drag);
-    
-    // 클릭으로 이동 (모바일/간편 조작용)
-    div.addEventListener('click', () => toggleSkillLocation(div));
+    div.addEventListener('dragstart', window.drag);
+    div.addEventListener('click', (e) => {
+        if(e.target.tagName === 'BUTTON') return; // 삭제 버튼 클릭시 이동 방지
+        toggleSkillLocation(div)
+    });
 
     container.appendChild(div);
 }
 
-// 5. 드래그 앤 드롭 필수 함수들
-function allowDrop(ev) { ev.preventDefault(); }
-function drag(ev) { ev.dataTransfer.setData("text", ev.target.id); }
-function drop(ev) {
-    ev.preventDefault();
-    const data = ev.dataTransfer.getData("text");
-    const draggedEl = document.getElementById(data);
-    
-    // 드롭된 영역이 어디인지 확인 (라이브러리 vs 장착칸)
-    const targetZone = ev.target.closest('#equipped-skill-list') ? 'equipped' : 
-                       ev.target.closest('#skill-library-list') ? 'library' : null;
+// 6. [관리자용] 스킬 삭제
+window.deleteSkillFromLibrary = async function(skillId, event) {
+    event.stopPropagation(); // 클릭 이벤트 전파 방지
+    if(!confirm(`정말 [${skillId}] 스킬을 삭제하시겠습니까?`)) return;
 
-    if (targetZone === 'equipped') {
-        moveSkillToEquipped(draggedEl);
-    } else if (targetZone === 'library') {
-        moveSkillToLibrary(draggedEl);
+    try {
+        await deleteDoc(doc(db, 'skillLibrary', skillId));
+        await loadSkillData(); // 새로고침
+    } catch(e) {
+        alert("삭제 실패: " + e.message);
     }
 }
 
-// 6. 스킬 이동 로직
+// 7. 드래그 앤 드롭 필수 함수들 (window 연결)
+window.allowDrop = function(ev) { ev.preventDefault(); }
+window.drag = function(ev) { ev.dataTransfer.setData("text", ev.target.id); }
+window.drop = function(ev) {
+    ev.preventDefault();
+    const data = ev.dataTransfer.getData("text");
+    const draggedEl = document.getElementById(data);
+    if(!draggedEl) return;
+
+    const targetZone = ev.target.closest('#equipped-skill-list') ? 'equipped' : 
+                       ev.target.closest('#skill-library-list') ? 'library' : null;
+
+    if (targetZone === 'equipped') moveSkillToEquipped(draggedEl);
+    else if (targetZone === 'library') moveSkillToLibrary(draggedEl);
+}
+
+// 내부 이동 로직
 function moveSkillToEquipped(el) {
     const equippedList = document.getElementById('equipped-skill-list');
-    if (equippedList.children.length >= 6) { // p 태그 포함이라 여유있게 체크, 실제론 count로 제어
-        const realCount = equippedList.querySelectorAll('.skill-item').length;
-        if(realCount >= 5) {
-            alert("최대 5개까지만 장착할 수 있습니다.");
-            return;
-        }
+    const currentCount = equippedList.querySelectorAll('.skill-item').length;
+    if(currentCount >= 5) {
+        alert("최대 5개까지만 장착할 수 있습니다.");
+        return;
     }
     equippedList.appendChild(el);
     updateSkillCount();
 }
 
 function moveSkillToLibrary(el) {
+    // 라이브러리로 돌아갈 때는 '관리자 추가 폼' 다음으로 넣기 위해 appendChild 사용
     document.getElementById('skill-library-list').appendChild(el);
     updateSkillCount();
 }
 
-// 클릭으로 토글 기능
 function toggleSkillLocation(el) {
     const parentId = el.parentElement.id;
     if (parentId === 'skill-library-list') moveSkillToEquipped(el);
@@ -4541,51 +4732,60 @@ function toggleSkillLocation(el) {
 }
 
 function updateSkillCount() {
-    const count = document.getElementById('equipped-skill-list').querySelectorAll('.skill-item').length;
+    const equippedList = document.getElementById('equipped-skill-list');
+    const count = equippedList.querySelectorAll('.skill-item').length;
     const badge = document.getElementById('skill-count-badge');
-    badge.textContent = `${count} / 5`;
-    badge.style.color = count === 5 ? '#ef4444' : '#6b7280';
-    
-    // 안내 문구 숨기기/보이기
-    const placeholder = document.querySelector('#equipped-skill-list p');
+    if(badge) {
+        badge.textContent = `${count} / 5`;
+        badge.style.color = count === 5 ? '#ef4444' : '#6b7280';
+    }
+    const placeholder = equippedList.querySelector('p');
     if(placeholder) placeholder.style.display = count > 0 ? 'none' : 'block';
 }
 
-// 7. 저장하기 (DB 업데이트)
-async function saveMySkills() {
+window.saveMySkills = async function() {
+    // 1. 현재 내 계정 정보 가져오기 (안전하게 state 사용)
+    const myAccount = window.state?.userAccount;
+    
+    if (!myAccount || !myAccount.loginId) {
+        alert("로그인 정보가 올바르지 않습니다. 새로고침 후 다시 시도해주세요.");
+        return;
+    }
+
+    // 2. 장착된 스킬 목록 가져오기
     const equippedList = document.getElementById('equipped-skill-list');
     const skillItems = equippedList.querySelectorAll('.skill-item');
     const newSkills = Array.from(skillItems).map(el => el.dataset.skillId);
     
-    // DB 저장
     try {
-        await db.collection('users').doc(auth.currentUser.uid).update({
-            combatSkills: newSkills
-        });
+        // ▼▼▼ [핵심] 저장 경로를 홈페이지가 읽는 곳(artifacts)으로 변경 ▼▼▼
+        const loginId = myAccount.loginId;
+        const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
         
-        // 프로필 UI 업데이트
-        renderProfileSkills(newSkills);
-        closeSkillEditor();
-        alert("스킬 설정이 저장되었습니다!");
+        // 3. DB에 저장 (merge: true로 기존 정보 유지)
+        await setDoc(userRef, {
+            combatSkills: newSkills,
+            updatedAt: new Date()
+        }, { merge: true });
+        
+        // 4. 화면 즉시 갱신 (새로고침 없이 반영)
+        // 로컬 state 업데이트
+        if(window.state && window.state.userAccount) {
+            window.state.userAccount.combatSkills = newSkills;
+        }
+        // 프로필 화면 업데이트
+        if (typeof window.renderProfileSkills === 'function') {
+            window.renderProfileSkills(newSkills);
+        }
+
+        window.closeSkillEditor();
+        alert("스킬 설정이 성공적으로 저장되었습니다!");
+        
     } catch (e) {
         console.error(e);
-        alert("저장 실패");
+        alert("저장 실패: " + e.message);
     }
 }
-
-// 8. 프로필 화면에 스킬 아이콘 갱신
-function renderProfileSkills(skills) {
-    const container = document.getElementById('profile-equipped-skills');
-    if (!skills || skills.length === 0) {
-        container.innerHTML = '<span class="text-gray-500 text-xs italic">No skills equipped.</span>';
-        return;
-    }
-    // (간단히 텍스트나 아이콘만 표시)
-    container.innerHTML = skills.map(id => 
-        `<span class="bg-gray-800 text-[#D4B783] text-xs px-2 py-1 border border-[#D4B783]/30 rounded">${id}</span>`
-    ).join('');
-}
-
     </script>
     <div id="raid-board-modal" class="fixed inset-0 bg-black/95 z-[9999] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
     
@@ -4635,7 +4835,13 @@ function renderProfileSkills(skills) {
 
         <div class="flex-1 flex overflow-hidden">
             <div class="w-1/2 p-4 border-r border-[#D4B783]/30 flex flex-col bg-[#111]">
-                <h3 class="text-gray-400 text-xs tracking-widest mb-3 uppercase">Available Arcanum</h3>
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-gray-400 text-xs tracking-widest uppercase">Available Arcanum</h3>
+                    <button id="admin-add-skill-btn" onclick="openAdminSkillAdd()" 
+                            class="hidden px-3 py-1 bg-[#D4B783]/20 hover:bg-[#D4B783]/40 text-[#D4B783] text-[10px] rounded border border-[#D4B783]/30 transition-colors">
+                        + ADD SKILL
+                    </button>
+                </div>
                 <div id="skill-library-list" class="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar" ondrop="drop(event)" ondragover="allowDrop(event)">
                     </div>
             </div>
@@ -4682,5 +4888,206 @@ function renderProfileSkills(skills) {
     .skill-name { color: #e5e5e5; font-size: 0.9rem; font-weight: bold; }
     .skill-type { font-size: 0.7rem; color: #888; }
 </style>
+
+<!-- 관리자 스킬 추가 모달 -->
+<div id="admin-skill-add-modal" class="fixed inset-0 bg-black/90 z-[10001] hidden flex items-center justify-center backdrop-blur-sm">
+    <div class="bg-[#0a0a0a] border border-[#D4B783]/50 w-[500px] flex flex-col shadow-[0_0_50px_rgba(212,183,131,0.2)]">
+        
+        <div class="flex justify-between items-center p-4 border-b border-[#D4B783]/30 bg-white/5">
+            <h2 class="text-[#D4B783] font-serif text-xl tracking-widest">ADD NEW SKILL</h2>
+            <button onclick="closeAdminSkillAdd()" class="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div class="p-6 space-y-4">
+            <div>
+                <label class="text-gray-400 text-xs block mb-2">Skill ID (English only, e.g., thunder_strike)</label>
+                <input id="admin-skill-id" type="text" class="w-full bg-black border border-white/10 rounded px-3 py-2 text-white text-sm" placeholder="thunder_strike">
+            </div>
+            
+            <div>
+                <label class="text-gray-400 text-xs block mb-2">Skill Name (Display)</label>
+                <input id="admin-skill-name" type="text" class="w-full bg-black border border-white/10 rounded px-3 py-2 text-white text-sm" placeholder="천둥 강타">
+            </div>
+            
+            <div>
+                <label class="text-gray-400 text-xs block mb-2">Icon (Emoji)</label>
+                <input id="admin-skill-icon" type="text" class="w-full bg-black border border-white/10 rounded px-3 py-2 text-white text-sm" placeholder="⚡" maxlength="2">
+            </div>
+            
+            <div>
+                <label class="text-gray-400 text-xs block mb-2">Type</label>
+                <select id="admin-skill-type" class="w-full bg-black border border-white/10 rounded px-3 py-2 text-white text-sm">
+                    <option value="Attack">Attack</option>
+                    <option value="Support">Support</option>
+                    <option value="Heal">Heal</option>
+                    <option value="Utility">Utility</option>
+                    <option value="Defense">Defense</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            
+            <div>
+                <label class="text-gray-400 text-xs block mb-2">Description</label>
+                <textarea id="admin-skill-desc" class="w-full bg-black border border-white/10 rounded px-3 py-2 text-white text-sm" rows="2" placeholder="스킬 설명"></textarea>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-[#D4B783]/30 flex justify-end gap-3 bg-black">
+            <button onclick="closeAdminSkillAdd()" class="px-6 py-2 text-gray-400 hover:text-white text-sm">CANCEL</button>
+            <button onclick="saveAdminSkill()" class="px-6 py-2 bg-[#D4B783] text-black font-bold text-sm hover:bg-[#c1a26c]">CREATE SKILL</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// 관리자 스킬 추가 모달 열기/닫기
+window.openAdminSkillAdd = function() {
+    document.getElementById('admin-skill-add-modal').classList.remove('hidden');
+}
+
+window.closeAdminSkillAdd = function() {
+    document.getElementById('admin-skill-add-modal').classList.add('hidden');
+    // 입력 필드 초기화
+    document.getElementById('admin-skill-id').value = '';
+    document.getElementById('admin-skill-name').value = '';
+    document.getElementById('admin-skill-icon').value = '';
+    document.getElementById('admin-skill-type').value = 'Attack';
+    document.getElementById('admin-skill-desc').value = '';
+}
+
+// 관리자 스킬 저장
+window.saveAdminSkill = async function() {
+    const skillId = document.getElementById('admin-skill-id').value.trim();
+    const skillName = document.getElementById('admin-skill-name').value.trim();
+    const skillIcon = document.getElementById('admin-skill-icon').value.trim();
+    const skillType = document.getElementById('admin-skill-type').value;
+    const skillDesc = document.getElementById('admin-skill-desc').value.trim();
+    
+    // 유효성 검사
+    if (!skillId || !skillName || !skillIcon) {
+        alert('스킬 ID, 이름, 아이콘은 필수입니다.');
+        return;
+    }
+    
+    // 영문 ID 검증
+    if (!/^[a-z_]+$/.test(skillId)) {
+        alert('스킬 ID는 영문 소문자와 언더스코어(_)만 사용 가능합니다.');
+        return;
+    }
+    
+    try {
+        // Firestore에 스킬 추가
+        const skillRef = doc(window.db, 'skillLibrary', skillId);
+        await setDoc(skillRef, {
+            id: skillId,
+            name: skillName,
+            icon: skillIcon,
+            type: skillType,
+            desc: skillDesc || '설명 없음'
+        });
+        
+        console.log('✅ 스킬 추가 완료:', skillId);
+        alert(`스킬 "${skillName}"이(가) 추가되었습니다!`);
+        
+        // 모달 닫고 스킬 목록 새로고침
+        closeAdminSkillAdd();
+        await loadSkillData();
+        
+    } catch (error) {
+        console.error('❌ 스킬 추가 실패:', error);
+        alert('스킬 추가 실패: ' + error.message);
+    }
+}
+window.renderProfileSkills = function(skills) {
+    const container = document.getElementById('profile-equipped-skills');
+    
+    // 컨테이너가 없으면(모달이 닫혀있거나 하면) 중단
+    if (!container) return;
+
+    // 스킬이 없거나 비어있을 때
+    if (!skills || skills.length === 0) {
+        container.innerHTML = `
+            <div class="col-span-5 text-center py-3 border border-dashed border-white/10 rounded-xl">
+                <span class="text-[10px] text-neutral-600">No skills equipped</span>
+            </div>`;
+        return;
+    }
+
+    // 스킬이 있으면: 위쪽 Stats 입력창과 똑같은 디자인으로 표시
+    // (현재는 ID만 표시되지만, 정상적으로 저장된 것임을 확인할 수 있습니다)
+    container.innerHTML = skills.map(id => `
+        <div class="w-full bg-black border border-white/10 rounded-xl px-1 py-3 text-[10px] text-white text-center font-mono truncate cursor-help hover:border-amber-500 transition-colors uppercase" title="${id}">
+            ${id}
+        </div>
+    `).join('');
+}
+window.importSkillsFromFile = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
+        try {
+            const jsonContent = e.target.result;
+            const importedData = JSON.parse(jsonContent);
+            
+            // 데이터가 배열인지 객체인지 확인하여 리스트로 변환
+            let skillsToImport = [];
+            if (Array.isArray(importedData)) {
+                skillsToImport = importedData;
+            } else if (typeof importedData === 'object' && importedData !== null) {
+                skillsToImport = Object.values(importedData);
+            }
+
+            if (skillsToImport.length === 0) {
+                alert("파일에 유효한 스킬 데이터가 없습니다.");
+                return;
+            }
+
+            if (!confirm(`${skillsToImport.length}개의 스킬을 도감에 추가하시겠습니까? (중복된 ID는 덮어씌워집니다)`)) {
+                event.target.value = ''; // 취소 시 파일 입력 초기화
+                return;
+            }
+
+            let successCount = 0;
+
+            // 하나씩 DB에 저장
+            for (const skill of skillsToImport) {
+                // 필수 데이터 검증 (ID와 이름이 없으면 건너뜀)
+                if (!skill.id || !skill.name) continue;
+
+                // Firestore 'skillLibrary' 컬렉션에 저장
+                await setDoc(doc(db, 'skillLibrary', skill.id), {
+                    id: skill.id,
+                    name: skill.name,
+                    icon: skill.icon || '⚔️',
+                    type: skill.type || 'Other',
+                    desc: skill.desc || skill.description || '가져온 스킬입니다.'
+                }, { merge: true }); // merge: true로 기존 데이터 유지하며 업데이트
+
+                successCount++;
+            }
+
+            alert(`✅ 총 ${successCount}개의 스킬이 도감에 등록되었습니다!`);
+            
+            // 스킬 편집창이 열려있다면 목록 새로고침
+            const editModal = document.getElementById('skill-edit-modal');
+            if (editModal && !editModal.classList.contains('hidden')) {
+                await loadSkillData();
+            }
+
+        } catch (error) {
+            console.error("스킬 불러오기 오류:", error);
+            alert("파일을 처리하는 중 오류가 발생했습니다: " + error.message);
+        } finally {
+            // 같은 파일을 다시 선택할 수 있도록 초기화
+            event.target.value = '';
+        }
+    };
+    
+    reader.readAsText(file);
+};
+</script>
 </body>
 </html>
