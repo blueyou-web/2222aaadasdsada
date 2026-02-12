@@ -1002,7 +1002,39 @@ body::before {
         opacity: 0;
     }
 }
+/* game_board.html <style> 구역에 추가 */
+.raid-room-card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%); /* */
+    border: 1px solid rgba(212, 183, 131, 0.2); /* */
+    transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1); /* */
+    position: relative; /* */
+    overflow: hidden; /* */
+}
 
+.raid-room-card:hover {
+    background: rgba(212, 183, 131, 0.1); /* */
+    border-color: rgba(212, 183, 131, 0.6); /* */
+    transform: translateY(-4px); /* */
+    box-shadow: 0 10px 20px rgba(0,0,0,0.4), 0 0 15px rgba(212, 183, 131, 0.1); /* */
+}
+
+.raid-room-card::before {
+    content: ""; /* */
+    position: absolute; /* */
+    top: 0; left: 0; width: 2px; height: 100%; /* */
+    background: #D4B783; /* */
+    transform: scaleY(0); /* */
+    transition: transform 0.3s ease; /* */
+}
+
+.raid-room-card:hover::before {
+    transform: scaleY(1); /* */
+}
+
+.deco-line {
+    position: absolute; /* */
+    background: rgba(212, 183, 131, 0.3); /* */
+}
     </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4 overflow-x-hidden pt-60">
@@ -1232,7 +1264,6 @@ body::before {
         </div>
     </div>
 
-
 <script type="module">
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('roomId');
@@ -1248,6 +1279,14 @@ const homepageStatAtk = decodeURIComponent(urlParams.get('statAtk') || '5-10');
 const homepageStatDef = decodeURIComponent(urlParams.get('statDef') || '2-5');
 const homepageStatMove = urlParams.get('statMove') || '3';
 const homepageUserSkills = decodeURIComponent(urlParams.get('skills') || '').split(',').filter(Boolean);
+
+console.log("🎯 URL 파라미터 확인:", {
+    userId: homepageUserId,
+    fromHomepage,
+    userName: homepageUserName,
+    skills: homepageUserSkills,
+    rawSkillsParam: urlParams.get('skills')
+});
 // 유저를 '미배치(Waiting)' 상태로 등록하는 함수
 async function initializeUserInRaid(roomId, user) {
     const participantRef = db.collection('raidRooms').doc(roomId).collection('participants').doc(user.uid);
@@ -1272,29 +1311,72 @@ async function initializeUserInRaid(roomId, user) {
 function watchParticipants(roomId) {
     db.collection('raidRooms').doc(roomId).collection('participants')
         .onSnapshot((snapshot) => {
-            const waitingList = document.getElementById('char-list-content'); // 캐릭터 리스트 영역
+            const waitingList = document.getElementById('char-list-content');
+            if (!waitingList) return;
+            
             waitingList.innerHTML = ''; // 초기화
 
+            // 1. 데이터를 배열로 변환
+            const participants = [];
             snapshot.forEach((doc) => {
-                const data = doc.data();
-                // x, y 좌표가 없는 유저만 리스트에 표시 (미배치 유저)
-                if (data.x === null || data.y === null) {
-                    const charItem = document.createElement('div');
-                    charItem.className = "flex items-center gap-3 p-2 bg-white/5 rounded cursor-move hover:bg-white/10 transition";
-                    charItem.draggable = true; // 드래그 가능하게 설정
-                    charItem.innerHTML = `
-                        <img src="${data.photoURL}" class="w-8 h-8 rounded-full border border-amber-500/50">
-                        <span class="text-xs text-white">${data.name}</span>
-                    `;
-                    
-                    // 드래그 시작 이벤트
-                    charItem.ondragstart = (e) => {
-                        e.dataTransfer.setData("charId", data.uid);
-                    };
-                    
-                    waitingList.appendChild(charItem);
-                }
+                participants.push({ uid: doc.id, ...doc.data() });
             });
+
+            // 2. 체력(HP) 낮은 순으로 정렬 (미배치 유저만 대상이면 필터 후 정렬)
+            const sortedParticipants = participants
+                .filter(data => data.x === null || data.y === null) // 보드에 없는 유저만
+                .sort((a, b) => {
+                    const hpA = a.hp || 0;
+                    const hpB = b.hp || 0;
+                    return hpA - hpB; // 오름차순 (낮은 순)
+                });
+
+            // 3. 정렬된 데이터로 리스트 생성
+            sortedParticipants.forEach((data) => {
+                const charItem = document.createElement('div');
+                // 리버스 1999 스타일 클래스 적용
+                charItem.className = "group relative p-3 mb-2 bg-white/5 border border-white/5 hover:border-[#D4B783]/40 cursor-move transition-all duration-300";
+                charItem.draggable = true;
+
+                const hpPercent = ((data.hp || 0) / (data.maxHp || 1)) * 100;
+                const hpColor = hpPercent < 30 ? '#ef4444' : '#D4B783'; // 위급하면 빨간색
+
+                charItem.innerHTML = `
+                    <div class="flex items-center gap-3 mb-2">
+                        <img src="${data.photoURL || 'https://via.placeholder.com/32'}" 
+                             class="w-8 h-8 rounded-sm border border-[#D4B783]/30 object-cover">
+                        <div class="flex-1 overflow-hidden">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[11px] font-bold text-white uppercase italic font-serif truncate">${data.name}</span>
+                                <span class="text-[9px] font-mono text-gray-500">${data.hp || 0}/${data.maxHp || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="w-full h-[1px] bg-white/5">
+                        <div class="h-full transition-all duration-500" 
+                             style="width: ${hpPercent}%; background-color: ${hpColor};"></div>
+                    </div>
+                    <div class="absolute top-0 right-0 w-1 h-1 border-t border-r border-[#D4B783]/0 group-hover:border-[#D4B783]/60 transition-all"></div>
+                `;
+                
+                // 드래그 시작 이벤트 유지
+                charItem.ondragstart = (e) => {
+                    e.dataTransfer.setData("charId", data.uid);
+                    // 드래그 시 고스트 이미지 효과를 위해 투명도 조절
+                    charItem.style.opacity = "0.5";
+                };
+
+                charItem.ondragend = () => {
+                    charItem.style.opacity = "1";
+                };
+                
+                waitingList.appendChild(charItem);
+            });
+
+            // 만약 리스트가 비어있다면 안내 문구
+            if (sortedParticipants.length === 0) {
+                waitingList.innerHTML = '<p class="text-[9px] text-gray-600 text-center py-4 font-mono uppercase tracking-widest">No Standby Personnel</p>';
+            }
         });
 }
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -1494,17 +1576,33 @@ const loginStatusModal = document.getElementById('login-status-modal');
     listenForGameData(gameId);
     listenForCombatTextEvents(gameId); 
     
-    openPCLoginModal();
+    // 홈페이지에서 온 경우 자동으로 토큰 생성 (PC 로그인 모달 건너뛰기)
+    if (fromHomepage && homepageUserId) {
+        console.log("🎮 홈페이지에서 접속 - 자동 토큰 생성 대기 중...");
+        // listenForGameData가 캐릭터를 로드할 때까지 잠시 대기
+        setTimeout(() => {
+            autoLoginHomepageUser(homepageUserId);
+        }, 1000);
+    } else {
+        openPCLoginModal();
+    }
 }
-    function leaveGame() { localStorage.removeItem('currentGameId', gameId); location.reload(); }
+    function leaveGame() { 
+        localStorage.removeItem('currentGameId'); 
+        location.reload(); 
+    }
 async function loadRaidRooms() {
     const roomsRef = collection(db, 'raidRooms');
     const snapshot = await getDocs(roomsRef);
     
     const roomListDiv = document.getElementById('raid-room-list');
+    if (!roomListDiv) return;
     
     if (snapshot.empty) {
-        roomListDiv.innerHTML = '<p class="text-center text-gray-400">생성된 방이 없습니다.</p>';
+        roomListDiv.innerHTML = `
+            <div class="py-20 text-center border border-dashed border-[#D4B783]/20 rounded-sm">
+                <p class="text-[10px] text-[#D4B783]/40 tracking-[0.5em] uppercase">No Signals Detected</p>
+            </div>`;
         return;
     }
     
@@ -1514,16 +1612,42 @@ async function loadRaidRooms() {
     }));
     
     roomListDiv.innerHTML = rooms.map(room => `
-        <div class="p-4 bg-gray-800/50 hover:bg-gray-700/50 rounded-lg cursor-pointer border border-gray-600 hover:border-amber-500 transition-all"
-             onclick="joinRaidRoom('${room.id}', '${room.roomName || '이름 없는 방'}')">
-            <div class="flex justify-between items-center">
-                <div>
-                    <h3 class="text-lg font-bold text-amber-500">${room.roomName || '이름 없는 방'}</h3>
-                    <p class="text-xs text-gray-400">방 코드: ${room.id}</p>
+        <div onclick="joinRaidRoom('${room.id}', '${room.roomName || '이름 없는 방'}')" 
+             class="raid-room-card group relative p-6 mb-4 cursor-pointer transition-all duration-500 bg-white/[0.02] border border-[#D4B783]/20 hover:bg-[#D4B783]/10 hover:border-[#D4B783]/60">
+            
+            <div class="absolute top-0 right-0 w-8 h-[1px] bg-[#D4B783]/30"></div>
+            <div class="absolute top-0 right-0 w-[1px] h-8 bg-[#D4B783]/30"></div>
+            
+            <div class="flex justify-between items-start">
+                <div class="space-y-2">
+                    <p class="text-[8px] text-[#D4B783] font-mono tracking-[0.3em] uppercase opacity-60">
+                        EST-ID: ${room.id.substring(0, 8).toUpperCase()}
+                    </p>
+                    <h4 class="text-2xl font-black text-white italic font-serif tracking-tighter group-hover:text-[#D4B783] transition-colors">
+                        ${room.roomName || '이름 없는 방'}
+                    </h4>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        <span class="text-[9px] text-gray-400 font-mono tracking-widest uppercase">Active Connection</span>
+                    </div>
                 </div>
-                <div class="text-right">
-                    <p class="text-sm text-gray-300">${room.playerCount || 0}명 참가 중</p>
-                    <p class="text-xs text-gray-500">생성: ${new Date(room.createdAt).toLocaleString('ko-KR', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</p>
+
+                <div class="flex flex-col items-end gap-1">
+                    <div class="text-[10px] text-[#D4B783] font-bold border border-[#D4B783]/30 px-3 py-1 bg-black/40">
+                        ${room.playerCount || 0} <span class="opacity-40">/</span> 10
+                    </div>
+                    <p class="text-[7px] text-gray-600 font-mono uppercase">Capacity</p>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-4 border-t border-[#D4B783]/10 flex items-end justify-between">
+                <div class="flex gap-1.5">
+                    <div class="w-1 h-3 bg-[#D4B783]"></div>
+                    <div class="w-1 h-3 bg-[#D4B783]/40"></div>
+                    <div class="w-1 h-3 bg-[#D4B783]/10"></div>
+                </div>
+                <div class="flex items-center gap-2 group-hover:translate-x-1 transition-transform">
+                    <span class="text-[10px] text-white/40 font-mono uppercase tracking-tighter">Enter Deployment Zone ></span>
                 </div>
             </div>
         </div>
@@ -1534,6 +1658,15 @@ async function loadRaidRooms() {
 window.joinRaidRoom = async function(roomId, roomName) {
     await joinGame(roomId);
     showCustomModal("방 참가 완료", `"${roomName}" 방에 입장했습니다.`, [{text:"확인", class:"bg-green-600"}]);
+    
+    // ⭐ 홈페이지에서 온 경우 토큰 자동 생성
+    if (fromHomepage && homepageUserId) {
+        console.log("🎯 방 입장 완료 - 토큰 자동 생성 시작");
+        // 약간의 딜레이를 주어 게임 데이터가 로드되도록 함
+        setTimeout(async () => {
+            await autoLoginHomepageUser(homepageUserId);
+        }, 1000);
+    }
 }
 
 // 새 방 만들기
@@ -1560,16 +1693,33 @@ async function createRaidRoom() {
     await joinGame(newRoomId, true);
     
     showCustomModal("방 생성 완료", `"${roomName}" 방이 생성되었습니다.`, [{text:"확인", class:"bg-green-600"}]);
+    
+    // ⭐ 홈페이지에서 온 경우 토큰 자동 생성
+    if (fromHomepage && homepageUserId) {
+        console.log("🎯 방 생성 완료 - 토큰 자동 생성 시작");
+        // 약간의 딜레이를 주어 게임 데이터가 로드되도록 함
+        setTimeout(async () => {
+            await autoLoginHomepageUser(homepageUserId);
+        }, 1000);
+    }
 }
 
 
 
 onAuthStateChanged(auth, async (user) => {  // ← async 추가!
     if (user) {
-        userId = user.uid;
+        // 홈페이지에서 온 경우, 홈페이지의 userId를 사용
+        if (fromHomepage && homepageUserId) {
+            userId = homepageUserId;
+            console.log("✅ 홈페이지에서 전달받은 userId 사용:", userId);
+        } else {
+            userId = user.uid;
+            console.log("✅ Firebase 익명 로그인 userId 사용:", userId);
+        }
         
         // 홈페이지에서 온 경우 방 목록 표시
         if (fromHomepage && homepageUserId) {
+            console.log("🎮 홈페이지에서 접속 - 방 목록 표시");
             await loadRaidRooms(); // 방 목록 로드
             lobbyModal.classList.remove('hidden'); // 방 목록 모달 표시
         } else {
@@ -2969,97 +3119,127 @@ async function applyStatusEffect(target, effectInfo) {
 }
 // 홈페이지 유저 기반 자동 토큰 생성 및 로그인
 async function autoLoginHomepageUser(userId) {
-    if (!gameId || !userId) return;
+    console.log("🎮 autoLoginHomepageUser 호출:", userId);
     
-    // 이미 해당 userId로 생성된 토큰이 있는지 확인
+    if (!gameId) {
+        console.error("❌ gameId 없음");
+        return;
+    }
+    
+    if (!userId) {
+        console.error("❌ userId 없음");
+        return;
+    }
+    
+    console.log("📊 게임 ID:", gameId);
+    console.log("👤 사용자 ID:", userId);
+    console.log("📦 캐릭터 배열:", characters.length, "개");
+    
     // Combat Stats 파싱 (기존 토큰 업데이트에도 사용)
-const hp = parseInt(homepageStatHp) || 100;
-const mp = parseInt(homepageStatMp) || 50;
-const [minAtk, maxAtk] = homepageStatAtk.split('-').map(v => parseInt(v.trim()) || 5);
-const [minDef, maxDef] = homepageStatDef.split('-').map(v => parseInt(v.trim()) || 2);
-const moveRange = parseInt(homepageStatMove) || 3;
+    const hp = parseInt(homepageStatHp) || 100;
+    const mp = parseInt(homepageStatMp) || 50;
+    const [minAtk, maxAtk] = homepageStatAtk.split('-').map(v => parseInt(v.trim()) || 5);
+    const [minDef, maxDef] = homepageStatDef.split('-').map(v => parseInt(v.trim()) || 2);
+    const moveRange = parseInt(homepageStatMove) || 3;
+    
+    // 스킬 파싱 (기본값: move, slash, heal)
+    const finalSkills = homepageUserSkills.length > 0 ? homepageUserSkills : ['move', 'slash', 'heal'];
+    
+    console.log("🎯 파싱된 데이터:", {
+        hp, mp, minAtk, maxAtk, minDef, maxDef, moveRange, 
+        skills: finalSkills
+    });
 
-// 이미 해당 userId로 생성된 토큰이 있는지 확인
-let existingToken = characters.find(c => 
-    c.type === 'PC' && 
-    c.homepageUserId === userId
-);
+    // 이미 해당 userId로 생성된 토큰이 있는지 확인 (로그아웃 상태 포함)
+    let existingToken = characters.find(c => 
+        c.type === 'PC' && 
+        c.homepageUserId === userId
+    );
+    
+    if (existingToken) {
+        console.log("♻️ 기존 토큰 발견 - 자동 로그인:", existingToken.id);
+        // 기존 토큰의 정보를 업데이트하고 로그인 처리
+        await updateDoc(doc(db, 'games', gameId, 'characters', existingToken.id), { 
+            isLoggedIn: true,
+            name: homepageUserName,
+            imageUrl: homepageUserImage,
+            hp: hp, // 현재 HP도 업데이트 (필요시)
+            maxHP: hp,
+            maxHp: hp,
+            mp: mp, // 현재 MP도 업데이트 (필요시)
+            maxMP: mp,
+            maxMp: mp,
+            minAttack: minAtk,
+            maxAttack: maxAtk,
+            minDefense: minDef,
+            maxDefense: maxDef,
+            moveRange: moveRange,
+            skills: finalSkills
+        });
+        
+        loggedInCharId = existingToken.id;
+        isAdmin = false;
+        updateAuthStatus();
+        
+        console.log("✅ 기존 토큰으로 자동 로그인 완료");
+        showCustomModal(
+            "자동 로그인", 
+            `${homepageUserName}(으)로 접속했습니다.`, 
+            [{text:"확인", class:"bg-green-600"}]
+        );
+        return;
+    }
+    
+    console.log("🆕 새 토큰 생성 시작...");
+    
+    // 새 토큰 생성
+    const tokenNumber = characters.filter(c => c.type === 'PC').length + 1;
+    const newTokenId = `token_${userId.substring(0, 8)}_${Date.now()}`;
 
-if (existingToken) {
-    // 기존 토큰의 정보를 업데이트
-    await updateDoc(doc(db, 'games', gameId, 'characters', existingToken.id), { 
-        isLoggedIn: true,
+    const newToken = {
+        id: newTokenId,
         name: homepageUserName,
-        imageUrl: homepageUserImage,
+        type: 'PC',
+        hp: hp,
         maxHP: hp,
         maxHp: hp,
+        mp: mp,
         maxMP: mp,
         maxMp: mp,
+        x: null,  // 미배치 상태
+        y: null,  // 미배치 상태
+        position: null,
+        imageUrl: homepageUserImage,
+        password: userId,
+        homepageUserId: userId,
+        isLoggedIn: true,
+        description: '홈페이지에서 접속한 유저입니다.',
+        turnOrder: 999,
+        statusEffects: [],
+        size: 1,
+        moveRange: moveRange,
         minAttack: minAtk,
         maxAttack: maxAtk,
         minDefense: minDef,
         maxDefense: maxDef,
-        moveRange: moveRange,
-        skills: finalSkills
-    });
+        hasActedThisRound: false,
+        skills: finalSkills,  // 홈페이지에서 전달받은 스킬
+        createdAt: Date.now()
+    };
     
-    loggedInCharId = existingToken.id;
-    isAdmin = false;
-    updateAuthStatus();
-    
-    showCustomModal(
-        "자동 로그인", 
-        `${homepageUserName}로 접속했습니다. (정보 업데이트됨)`, 
-        [{text:"확인", class:"bg-green-600"}]
-    );
-    return;
-}
-    
-    // 새 토큰 생성
-    const tokenNumber = characters.filter(c => c.type === 'PC').length + 1;
-    // 새 토큰 생성
-const newTokenId = `token_${userId.substring(0, 8)}_${Date.now()}`;
-// Combat Stats 파싱
-
-const newToken = {
-    id: newTokenId,
-    name: homepageUserName,
-    type: 'PC',
-    hp: hp,
-    maxHP: hp,
-    maxHp: hp,  // 대소문자 통일 문제 대비
-    mp: mp,
-    maxMP: mp,
-    maxMp: mp,  // 대소문자 통일 문제 대비
-    x: null,
-    y: null,
-    position: null,
-    imageUrl: homepageUserImage,
-    password: userId,
-    homepageUserId: userId,
-    isLoggedIn: true,
-    description: '홈페이지에서 접속한 유저입니다.',
-    turnOrder: 999,
-    statusEffects: [],
-    size: 1,
-    moveRange: moveRange,
-    skills: ['slash', 'heal'],
-    minAttack: minAtk,
-    maxAttack: maxAtk,
-    minDefense: minDef,
-    maxDefense: maxDef,
-    hasActedThisRound: false,
-    skills: finalSkills,
-    createdAt: Date.now()
-};
+    console.log("💾 새 토큰 데이터:", newToken);
     
     // Firestore에 저장
     await setDoc(doc(db, 'games', gameId, 'characters', newTokenId), newToken);
+    
+    console.log("✅ 새 토큰 Firestore 저장 완료:", newTokenId);
     
     // 로그인 처리
     loggedInCharId = newTokenId;
     isAdmin = false;
     updateAuthStatus();
+    
+    console.log("✅ 자동 로그인 완료 - 토큰 ID:", loggedInCharId);
     
     showCustomModal(
         "새 토큰 생성 완료", 
@@ -4364,13 +4544,17 @@ async function resetAllCharacterStats() {
             </div>
         </div>`;
         modalHtml += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
-    <h4 class="font-bold text-lg mb-4 text-yellow-400">방 설정 저장/불러오기</h4>
-    <p class="text-sm text-gray-400 mb-4">현재 게임의 모든 설정(캐릭터, 스킬, 맵 등)을 하나의 파일로 저장하거나, 파일에서 불러와 덮어씌웁니다.</p>
-    <div class="grid grid-cols-2 gap-4">
-        <button id="save-settings-btn" class="w-full bg-blue-600 p-2">설정 파일로 저장하기</button>
-        <button id="load-settings-btn" class="w-full bg-green-600 p-2">파일에서 불러오기</button>
+    <h4 class="font-bold text-lg mb-4 text-yellow-400">방 설정 & 데이터 백업</h4>
+    <p class="text-sm text-gray-400 mb-4">게임 전체 상태를 저장하거나, 스킬 데이터만 따로 관리할 수 있습니다.</p>
+    
+    <div class="mb-2 text-xs text-gray-500 font-bold uppercase">Game Settings (Full)</div>
+    <div class="grid grid-cols-2 gap-4 mb-6">
+        <button id="save-settings-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-2 rounded shadow transition">📦 전체 설정 저장</button>
+        <button id="load-settings-btn" class="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded shadow transition">📂 전체 설정 불러오기</button>
     </div>
+
     <input type="file" id="load-settings-input" class="hidden" accept=".json">
+    <input type="file" id="input-import-skills-sub" class="hidden" accept=".json">
 </div>`;
 
 modalHtml += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
@@ -4399,7 +4583,19 @@ modalHtml += `<div class="mb-8 p-4 border border-gray-700 rounded-md">
             return acc;
         }, {});
 
-        let skillHtml = `<div id="admin-skill-list" class="space-y-6"><h3 class="text-2xl font-bold font-title" style="color: var(--accent-primary);">스킬 목록/편집</h3>`;
+        let skillHtml = `<div id="admin-skill-list" class="space-y-6">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-700 pb-4 mb-4 gap-4">
+        <h3 class="text-2xl font-bold font-title" style="color: var(--accent-primary);">스킬 목록/편집</h3>
+        <div class="flex gap-2">
+            <button id="btn-export-only-skills" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2 px-4 rounded shadow-lg transition flex items-center gap-2">
+                📤 스킬 내보내기 (.json)
+            </button>
+            <button id="btn-import-only-skills" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-2 px-4 rounded shadow-lg transition flex items-center gap-2">
+                📥 스킬 불러오기
+            </button>
+            <input type="file" id="input-import-skills" class="hidden" accept=".json">
+        </div>
+    </div>`;
         SKILL_CATEGORIES.forEach(category => {
             const skills = skillsByCategory[category];
             if (skills && skills.length > 0) {
@@ -4651,6 +4847,32 @@ document.getElementById('force-enemy-phase-btn').onclick = async () => {
         };
 
         adminModal.classList.remove('hidden');
+        const exportBtn = document.getElementById('btn-export-only-skills');
+    const importBtn = document.getElementById('btn-import-only-skills');
+    const importInput = document.getElementById('input-import-skills');
+
+    if (exportBtn) exportBtn.onclick = exportSkillsToJson;
+    if (importBtn) importBtn.onclick = () => importInput.click();
+    if (importInput) {
+        importInput.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (file) await importSkillsFromJson(file);
+            e.target.value = ''; // 같은 파일 다시 선택 가능하게 초기화
+        };
+    }
+    const exportSubBtn = document.getElementById('btn-export-skills-sub');
+    const importSubBtn = document.getElementById('btn-import-skills-sub');
+    const importSubInput = document.getElementById('input-import-skills-sub');
+
+    if (exportSubBtn) exportSubBtn.onclick = exportSkillsToJson;
+    if (importSubBtn) importSubBtn.onclick = () => importSubInput.click();
+    if (importSubInput) {
+        importSubInput.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (file) await importSkillsFromJson(file); // 지난번 만든 함수 재사용
+            e.target.value = '';
+        };
+    }
     }
 
     function getSkillEditFormHtml(s) {
@@ -5450,6 +5672,65 @@ window.addEventListener('beforeunload', async (event) => {
         await updateDoc(doc(db, 'games', gameId, 'characters', loggedInCharId), { isLoggedIn: false });
     }
 });
+
+// 게임보드의 스킬 라이브러리 전체를 JSON 파일로 저장
+async function backupSkillsToFile() {
+    try {
+        const docSnap = await getDoc(doc(db, 'games', gameId));
+        if (docSnap.exists()) {
+            const skillData = docSnap.data().skills || {};
+            const dataStr = JSON.stringify(skillData, null, 2);
+            const blob = new Blob([dataStr], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `skills_backup_${gameId}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+    } catch (error) {
+        console.error("백업 실패:", error);
+    }
+}
+async function exportSkillsToJson() {
+    try {
+        // 1. Firebase에서 현재 게임의 스킬 데이터를 가져옵니다.
+        // gameId는 현재 접속 중인 방의 ID입니다.
+        const gameDocRef = doc(db, 'games', gameId);
+        const docSnap = await getDoc(gameDocRef);
+
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            const skills = data.skills || {}; // 스킬 데이터 추출
+
+            if (Object.keys(skills).length === 0) {
+                alert("내보낼 스킬 데이터가 없습니다.");
+                return;
+            }
+
+            // 2. 데이터를 JSON 문자열로 변환합니다.
+            const dataStr = JSON.stringify(skills, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+
+            // 3. 가상의 링크를 만들어 다운로드를 실행합니다.
+            const exportFileDefaultName = `skills_backup_${new Date().toISOString().slice(0, 10)}.json`;
+
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            console.log("✅ 스킬 내보내기 완료");
+        } else {
+            alert("게임 데이터를 찾을 수 없습니다.");
+        }
+    } catch (error) {
+        console.error("❌ 내보내기 중 오류 발생:", error);
+        alert("내보내기 실패: " + error.message);
+    }
+}
+
 </script>
 </body>
 </html>
