@@ -611,20 +611,28 @@ function subscribeToData() {
     }
 }
 
-        // --- Core Navigation ---
-        window.switchView = (viewId) => {
-            if (state.currentView === viewId && state.initDone) return;
-            const area = $('content-area');
-            area.classList.add('view-exit');
-            setTimeout(() => {
-                state.currentView = viewId;
-                area.classList.remove('view-exit');
-                area.classList.add('view-enter');
-                renderView(viewId);
-                updateSidebarUI();
-                setTimeout(() => area.classList.remove('view-enter'), 500);
-            }, 300);
-        };
+      window.switchView = (viewId) => {
+    if (state.currentView === viewId && state.initDone) return;
+
+    // ✅ [추가할 부분] 조사(investigation) 탭으로 이동할 때마다 장소 정보 초기화
+    // 이렇게 하면 항상 '목록 화면'부터 시작하게 됩니다.
+    if (viewId === 'investigation' && state.investigation) {
+        state.investigation.currentPoi = null;
+    }
+
+    const area = $('content-area');
+    area.classList.add('view-exit');
+    setTimeout(() => {
+        state.currentView = viewId;
+        area.classList.remove('view-exit');
+        area.classList.add('view-enter');
+        
+        renderView(viewId); // 이제 초기화된 상태(목록)로 렌더링됩니다.
+        
+        updateSidebarUI();
+        setTimeout(() => area.classList.remove('view-enter'), 500);
+    }, 300);
+};
 
         function renderView(viewId) {
     const area = $('content-area');
