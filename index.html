@@ -235,7 +235,20 @@
             
             <div class="flex-1 px-4 py-4 space-y-2 overflow-y-auto" id="sidebar-nav"></div>
 
-            <div class="p-6 border-t border-white/5 bg-black/20">
+            <div class="p-6 border-t border-white/5 bg-black/20 space-y-3">
+                <!-- 코인 & 인벤토리 -->
+                <div class="flex gap-2">
+                    <button onclick="openInventory()" class="flex-1 bg-neutral-900/50 border border-white/5 rounded-xl py-2 px-3 flex items-center justify-center gap-2 hover:border-amber-500/30 transition-all group">
+                        <i data-lucide="package" class="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform"></i>
+                        <span class="text-[10px] text-neutral-400 group-hover:text-white font-bold uppercase">Bag</span>
+                    </button>
+                    <div class="flex-1 bg-neutral-900/50 border border-white/5 rounded-xl py-2 px-3 flex items-center justify-center gap-2">
+                        <i data-lucide="coins" class="w-4 h-4 text-amber-500"></i>
+                        <span id="user-coins-display" class="text-[10px] text-white font-bold font-mono">0</span>
+                    </div>
+                </div>
+                
+                <!-- 프로필 -->
                 <div class="bg-neutral-900/50 p-4 rounded-3xl flex items-center gap-3 border border-white/5 hover:border-amber-500/30 transition-all">
                     <div class="w-10 h-10 rounded-xl bg-black overflow-hidden border border-white/10 shrink-0 shadow-lg cursor-pointer transition-transform active:scale-90" onclick="switchView('profile')">
                         <img id="user-avatar" src="" class="w-full h-full object-cover hidden">
@@ -324,6 +337,26 @@
                 <span id="toast-message">Notification</span>
             </div>
         </div>
+        
+        <!-- 인벤토리 모달 -->
+        <div id="inventory-modal" class="hidden fixed inset-0 z-[200] bg-black/90 flex items-center justify-center backdrop-blur-md p-6">
+            <div class="w-full max-w-4xl bg-neutral-900 border border-amber-500/30 rounded-3xl shadow-2xl overflow-hidden modal-enter">
+                <div class="p-8 border-b border-white/5 flex justify-between items-center bg-black/40">
+                    <div>
+                        <h3 class="text-2xl font-black text-white uppercase italic tracking-tighter">Inventory</h3>
+                        <p class="text-[10px] text-amber-500 uppercase tracking-widest mt-1">Your Items</p>
+                    </div>
+                    <button onclick="closeInventory()" class="text-neutral-500 hover:text-white transition-colors">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <div id="inventory-content" class="p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <!-- 아이템이 여기에 표시됨 -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Firebase SDK -->
@@ -331,7 +364,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, updateDoc, deleteDoc, writeBatch, getDocs, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, updateDoc, deleteDoc, writeBatch, getDocs, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         // --- Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyB7XJPpZzfDbdDCsbzMVO9HTZqrpUlMX-Y",
@@ -348,9 +381,10 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         
-        // db와 auth를 전역으로 노출 (Combat Skills 편집기에서 사용)
+        // db, auth, appId를 전역으로 노출 (Combat Skills 편집기 및 관리자 기능에서 사용)
         window.db = db;
         window.auth = auth;
+        window.appId = appId;
         
         // Firestore 함수들도 전역으로 노출
         window.collection = collection;
@@ -360,6 +394,13 @@
         window.updateDoc = updateDoc;
         window.writeBatch = writeBatch;
         window.setDoc = setDoc;
+        window.addDoc = addDoc;
+        window.serverTimestamp = serverTimestamp;
+        window.onSnapshot = onSnapshot;
+        window.query = query;
+window.where = where;
+window.orderBy = orderBy;
+window.limit = limit;
 
         const $ = (id) => document.getElementById(id);
 
@@ -497,6 +538,61 @@ function subscribeToData() {
         updateUserSession();
         if (['members', 'admin', 'mail'].includes(state.currentView)) renderView(state.currentView);
     });
+    
+    // 2-1. 내 계정 문서 실시간 리스너 (HP/MP/inventory 실시간 반영)
+    let myAccountUnsubscribe = null;
+    const setupMyAccountListener = () => {
+        if (myAccountUnsubscribe) myAccountUnsubscribe();
+        
+        if (state.userAccount?.loginId) {
+            const myAccountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', state.userAccount.loginId);
+            myAccountUnsubscribe = onSnapshot(myAccountRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    
+                    // currentHP/currentMP 업데이트
+                    if (data.currentHP !== undefined) {
+                        state.userAccount.currentHP = data.currentHP;
+                    }
+                    if (data.currentMP !== undefined) {
+                        state.userAccount.currentMP = data.currentMP;
+                    }
+                    
+                    // inventory 업데이트 (선물 받은 경우 실시간 반영)
+                    if (data.inventory !== undefined) {
+                        state.userAccount.inventory = data.inventory;
+                        console.log("📦 인벤토리 실시간 업데이트:", data.inventory.length, "개 아이템");
+                    }
+                    
+                    // ⭐ state.accounts 배열도 함께 업데이트 (멤버 갤러리용)
+                    const accountIndex = state.accounts.findIndex(a => a.loginId === state.userAccount.loginId);
+                    if (accountIndex !== -1) {
+                        if (data.currentHP !== undefined) {
+                            state.accounts[accountIndex].currentHP = data.currentHP;
+                        }
+                        if (data.currentMP !== undefined) {
+                            state.accounts[accountIndex].currentMP = data.currentMP;
+                        }
+                        if (data.inventory !== undefined) {
+                            state.accounts[accountIndex].inventory = data.inventory;
+                        }
+                    }
+                    
+                    // 현재 프로필 화면이면 재렌더링
+                    if (state.currentView === 'profile') {
+                        renderProfile();
+                    }
+                    
+                    // 멤버 갤러리 화면이면 재렌더링
+                    if (state.currentView === 'members') {
+                        renderMembers();
+                    }
+                    
+                    console.log("🔄 HP/MP 실시간 업데이트:", data.currentHP, "/", data.stat_hp, ",", data.currentMP, "/", data.stat_mp);
+                }
+            });
+        }
+    };
 
     // 3. 채팅방 (목록 갱신)
     onSnapshot(roomsRef, (snapshot) => {
@@ -567,7 +663,7 @@ function subscribeToData() {
         updateMyNotifications();
     });
 }
-        function updateUserSession() {
+        async function updateUserSession() {
     console.log("🔄 updateUserSession 호출됨");
     if (!state.user) {
         console.log("❌ state.user 없음");
@@ -579,6 +675,68 @@ function subscribeToData() {
     console.log("🎯 combatSkills:", myAcc?.combatSkills);
     state.userAccount = myAcc || { status: 'new' };
     
+    // inventory와 currentHP/currentMP 로드 (users 컬렉션에서)
+    if (state.user.uid && myAcc?.loginId) {
+        try {
+            const userRef = doc(db, 'artifacts', appId, 'users', state.user.uid);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+                const userData = userSnap.data();
+                if (userData.inventory) {
+                    state.userAccount.inventory = userData.inventory;
+                    console.log("📦 인벤토리 로드 완료:", userData.inventory.length, "개 아이템");
+                }
+            }
+            
+            // accounts에서 currentHP/currentMP 로드
+            const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', myAcc.loginId);
+            const accountSnap = await getDoc(accountRef);
+            if (accountSnap.exists()) {
+                const accountData = accountSnap.data();
+                
+                // inventory도 accounts에서 로드 (accounts가 더 최신일 수 있음)
+                if (accountData.inventory !== undefined) {
+                    state.userAccount.inventory = accountData.inventory;
+                    console.log("📦 accounts에서 인벤토리 로드:", accountData.inventory.length, "개 아이템");
+                }
+                
+                // HP/MP 초기화 (기존 유저를 위해)
+                let needsUpdate = false;
+                const updates = {};
+                
+                if (accountData.currentHP !== undefined) {
+                    state.userAccount.currentHP = accountData.currentHP;
+                    console.log("❤️ 현재 HP 로드:", accountData.currentHP);
+                } else {
+                    // HP가 없으면 기본값 설정
+                    state.userAccount.currentHP = accountData.stat_hp || 100;
+                    updates.currentHP = state.userAccount.currentHP;
+                    needsUpdate = true;
+                    console.log("❤️ 초기 HP 설정:", state.userAccount.currentHP);
+                }
+                
+                if (accountData.currentMP !== undefined) {
+                    state.userAccount.currentMP = accountData.currentMP;
+                    console.log("💧 현재 MP 로드:", accountData.currentMP);
+                } else {
+                    // MP가 없으면 기본값 설정
+                    state.userAccount.currentMP = accountData.stat_mp || 50;
+                    updates.currentMP = state.userAccount.currentMP;
+                    needsUpdate = true;
+                    console.log("💧 초기 MP 설정:", state.userAccount.currentMP);
+                }
+                
+                // 업데이트가 필요하면 Firestore에 저장
+                if (needsUpdate) {
+                    await setDoc(accountRef, updates, { merge: true });
+                    console.log("✅ 초기 HP/MP Firestore에 저장 완료");
+                }
+            }
+        } catch(e) {
+            console.error("❌ 데이터 로드 실패:", e);
+        }
+    }
+    
     if (myAcc && myAcc.status === 'approved') {
         console.log("✅ 승인된 계정 - 메인 화면으로 이동");
         // [추가됨] 권한 체크: 'staff' 등급이면 관리자 권한 자동 부여
@@ -587,9 +745,27 @@ function subscribeToData() {
             console.log("🔑 관리자 권한 부여됨");
         }
 
+        // [추가됨] users 컬렉션에 문서가 없으면 자동 생성 (코인 정보 포함)
+        try {
+            const userRef = doc(db, 'artifacts', appId, 'users', state.user.uid);
+            await setDoc(userRef, {
+                loginId: myAcc.loginId,
+                coins: myAcc.coins || 0,
+                lastLogin: serverTimestamp()
+            }, { merge: true });
+            console.log("✅ users 문서 동기화 완료");
+        } catch(e) {
+            console.error("❌ users 문서 생성 실패:", e);
+        }
+
         hideLoading();
         $('auth-view').classList.add('hidden');
         updateProfileBarUI();
+        
+        // HP/MP 실시간 리스너 설정
+        if (typeof setupMyAccountListener === 'function') {
+            setupMyAccountListener();
+        }
         
         // 로그인 완료 시 알림 목록 갱신
         if (typeof updateMyNotifications === 'function') updateMyNotifications();
@@ -971,7 +1147,7 @@ function subscribeToData() {
             const timeStr = m.timestamp ? new Date(m.timestamp.seconds * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '...';
 
             let dateDivider = '';
-            if (showDate) {
+            if (showDate && m.timestamp) {
                 const dateOptions = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
                 const dateStr = new Date(m.timestamp.seconds * 1000).toLocaleDateString('ko-KR', dateOptions);
                 dateDivider = `<div class="flex items-center justify-center my-6 opacity-60"><div class="h-px w-12 bg-gradient-to-r from-transparent to-white/20"></div><span class="px-4 text-[10px] font-mono text-neutral-500 uppercase tracking-widest border border-white/10 rounded-full py-1 bg-black/30 backdrop-blur-sm">${dateStr}</span><div class="h-px w-12 bg-gradient-to-l from-transparent to-white/20"></div></div>`;
@@ -1559,13 +1735,39 @@ window.handleCreateGroup = async () => {
                 </div>
 <div class="space-y-6">
     <h3 class="text-xs font-black text-amber-500 uppercase tracking-widest border-b border-white/5 pb-2">Combat Stats</h3>
+    
+    <!-- 현재 HP/MP 표시 -->
+    <div class="bg-black/50 border border-white/10 rounded-xl p-4 space-y-3">
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-[9px] font-bold text-red-500 uppercase">Current HP</span>
+                <span class="text-[9px] text-neutral-400 font-mono">${oc.currentHP || oc.stat_hp || 100}/${oc.stat_hp || 100}</span>
+            </div>
+            <div class="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-red-600 to-red-500 transition-all duration-300" 
+                     style="width: ${((oc.currentHP || oc.stat_hp || 100) / (oc.stat_hp || 100)) * 100}%"></div>
+            </div>
+        </div>
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-[9px] font-bold text-blue-500 uppercase">Current MP</span>
+                <span class="text-[9px] text-neutral-400 font-mono">${oc.currentMP || oc.stat_mp || 50}/${oc.stat_mp || 50}</span>
+            </div>
+            <div class="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-blue-600 to-blue-500 transition-all duration-300" 
+                     style="width: ${((oc.currentMP || oc.stat_mp || 50) / (oc.stat_mp || 50)) * 100}%"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 최대 스탯 설정 -->
     <div class="grid grid-cols-5 gap-3">
         <div>
-            <label class="text-[9px] font-bold text-neutral-500 uppercase block mb-1 text-center">HP</label>
+            <label class="text-[9px] font-bold text-neutral-500 uppercase block mb-1 text-center">Max HP</label>
             <input id="edit-stat-hp" value="${oc.stat_hp || '100'}" class="w-full bg-black border border-white/10 rounded-xl px-2 py-3 text-xs text-white text-center font-mono focus:border-red-500 outline-none" placeholder="100">
         </div>
         <div>
-            <label class="text-[9px] font-bold text-neutral-500 uppercase block mb-1 text-center">MP</label>
+            <label class="text-[9px] font-bold text-neutral-500 uppercase block mb-1 text-center">Max MP</label>
             <input id="edit-stat-mp" value="${oc.stat_mp || '50'}" class="w-full bg-black border border-white/10 rounded-xl px-2 py-3 text-xs text-white text-center font-mono focus:border-blue-500 outline-none" placeholder="50">
         </div>
         <div>
@@ -1661,6 +1863,7 @@ window.filterGroupMembers = () => {
 
     // 2. 저장할 데이터 객체 만들기
     // (여기서 skills는 제외하여 기존 스킬 데이터가 날아가지 않게 보호합니다)
+    // currentHP/currentMP는 게임보드와 관리자만 수정 가능하므로 제외
     const updateData = {
         badgeText: getVal('edit-badge'),
         ocName: getVal('edit-name'),
@@ -1830,6 +2033,22 @@ window.filterGroupMembers = () => {
                 </button>
             </section>
 
+            <!-- 아이템 마스터 데이터베이스 섹션 -->
+            <section class="space-y-12">
+                <div class="flex justify-between items-end">
+                    <h3 class="text-xs font-black uppercase text-neutral-400 border-l-8 border-green-500 pl-6 tracking-[0.5em]">Item Master Database</h3>
+                    <div class="flex gap-2">
+                        <button onclick="initializeDefaultItems()" class="px-4 py-2 bg-purple-900/30 text-purple-400 border border-purple-500/30 rounded-lg text-[10px] font-bold uppercase hover:bg-purple-600 hover:text-white transition-all">⚡ Init Defaults</button>
+                        <button onclick="openItemMasterModal()" class="px-4 py-2 bg-green-900/30 text-green-400 border border-green-500/30 rounded-lg text-[10px] font-bold uppercase hover:bg-green-600 hover:text-white transition-all">+ Add Item</button>
+                    </div>
+                </div>
+                <p class="text-[9px] text-neutral-500 italic">기본 가챠 아이템이 없으면 "Init Defaults"를 클릭하여 Golden Fleece, Silver Sword, Ration Pack을 생성하세요.</p>
+                
+                <div id="item-master-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <p class="text-neutral-500 text-xs italic text-center col-span-full py-10">Loading items...</p>
+                </div>
+            </section>
+
             <section class="space-y-12">
                 <h3 class="text-xs font-black uppercase text-red-500 border-l-8 border-red-600 pl-6 tracking-[0.5em]">User Reports (Incoming)</h3>
                 <div class="bg-neutral-900 border border-red-900/30 rounded-[2rem] p-8 min-h-[150px]" id="admin-reports-list">
@@ -1860,6 +2079,86 @@ window.filterGroupMembers = () => {
                 </div>
             </section>
 
+            <!-- HP/MP 관리 섹션 -->
+            <section class="space-y-12">
+                <div class="flex justify-between items-center cursor-pointer" onclick="toggleHPMPSection()">
+                    <h3 class="text-xs font-black uppercase text-neutral-400 border-l-8 border-red-500 pl-6 tracking-[0.5em]">HP/MP Management Center</h3>
+                    <i data-lucide="chevron-down" id="hpmp-toggle-icon" class="w-5 h-5 text-neutral-400 transition-transform"></i>
+                </div>
+                <p class="text-[10px] text-neutral-500 italic">이곳에서 수정한 HP/MP가 모든 시스템(홈페이지, 게임보드)에 즉시 반영됩니다.</p>
+                
+                <div id="hpmp-content" class="space-y-8">
+                    <div class="overflow-x-auto custom-scrollbar">
+                        <table class="w-full border-collapse">
+                            <thead>
+                                <tr class="border-b border-white/10">
+                                    <th class="text-left py-4 px-4 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Personnel</th>
+                                    <th class="text-center py-4 px-4 text-[10px] font-black text-red-400 uppercase tracking-widest">Current HP</th>
+                                    <th class="text-center py-4 px-4 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Max HP</th>
+                                    <th class="text-center py-4 px-4 text-[10px] font-black text-blue-400 uppercase tracking-widest">Current MP</th>
+                                    <th class="text-center py-4 px-4 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Max MP</th>
+                                    <th class="text-center py-4 px-4 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${approveds.map(a => `
+                                    <tr class="border-b border-white/5 hover:bg-neutral-800/50 transition-colors">
+                                        <td class="py-4 px-4">
+                                            <div class="flex items-center gap-3">
+                                                <img src="${a.profile}" class="w-10 h-10 rounded-xl object-cover">
+                                                <div>
+                                                    <p class="text-sm font-bold text-white">${a.ocName}</p>
+                                                    <p class="text-[9px] text-neutral-500 font-mono">${a.loginId}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="text-center py-4 px-4">
+                                            <input type="number" 
+                                                   id="hp-current-${a.loginId}" 
+                                                   value="${a.currentHP || a.stat_hp || 100}" 
+                                                   min="0" 
+                                                   max="${a.stat_hp || 100}"
+                                                   class="w-20 bg-black border border-red-500/30 rounded-lg px-3 py-2 text-center text-sm text-red-400 font-mono outline-none focus:border-red-500">
+                                        </td>
+                                        <td class="text-center py-4 px-4">
+                                            <span class="text-sm text-neutral-400 font-mono">${a.stat_hp || 100}</span>
+                                        </td>
+                                        <td class="text-center py-4 px-4">
+                                            <input type="number" 
+                                                   id="mp-current-${a.loginId}" 
+                                                   value="${a.currentMP || a.stat_mp || 50}" 
+                                                   min="0" 
+                                                   max="${a.stat_mp || 50}"
+                                                   class="w-20 bg-black border border-blue-500/30 rounded-lg px-3 py-2 text-center text-sm text-blue-400 font-mono outline-none focus:border-blue-500">
+                                        </td>
+                                        <td class="text-center py-4 px-4">
+                                            <span class="text-sm text-neutral-400 font-mono">${a.stat_mp || 50}</span>
+                                        </td>
+                                        <td class="text-center py-4 px-4">
+                                            <button onclick="updateUserHPMP('${a.loginId}')" 
+                                                    class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all">
+                                                Update
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="flex gap-4">
+                        <button onclick="resetAllHP()" 
+                                class="flex-1 py-4 bg-red-900/30 hover:bg-red-600 border border-red-500/30 text-red-400 hover:text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">
+                            Reset All HP to Max
+                        </button>
+                        <button onclick="resetAllMP()" 
+                                class="flex-1 py-4 bg-blue-900/30 hover:bg-blue-600 border border-blue-500/30 text-blue-400 hover:text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">
+                            Reset All MP to Max
+                        </button>
+                    </div>
+                </div>
+            </section>
+
             <section class="space-y-12">
                 <h3 class="text-xs font-black uppercase text-neutral-400 border-l-8 border-amber-500 pl-6 tracking-[0.5em]">Personnel Files (Edit)</h3>
                 <div class="grid grid-cols-1 gap-4">
@@ -1881,6 +2180,126 @@ window.filterGroupMembers = () => {
             <div id="admin-edit-modal" class="hidden fixed inset-0 z-[120] bg-black/95 flex items-center justify-center p-6 backdrop-blur-xl">
             <div id="admin-edit-container" class="w-full max-w-2xl bg-neutral-900 border border-amber-600/30 rounded-[4rem] p-12 shadow-2xl modal-enter"></div>
         </div>
+        
+        <!-- 아이템 마스터 편집 모달 -->
+        <div id="item-master-modal" class="hidden fixed inset-0 z-[120] bg-black/95 flex items-center justify-center p-6 backdrop-blur-xl">
+            <div class="w-full max-w-2xl bg-neutral-900 border border-green-600/30 rounded-[3rem] p-10 shadow-2xl modal-enter max-h-[90vh] overflow-y-auto custom-scrollbar">
+                <h3 class="text-2xl font-black text-white uppercase tracking-tighter mb-6 text-center">Item Master Editor</h3>
+                
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Item ID</label>
+                            <input id="item-id" type="text" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500" placeholder="potion_hp_small">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Item Name</label>
+                            <input id="item-name" type="text" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500" placeholder="Small HP Potion">
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Type</label>
+                            <select id="item-type" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500">
+                                <option value="consumable">Consumable</option>
+                                <option value="equipment">Equipment</option>
+                                <option value="quest">Quest Item</option>
+                                <option value="material">Material</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Rarity (1-5)</label>
+                            <input id="item-rarity" type="number" min="1" max="5" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500" value="3">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Price (Coins)</label>
+                            <input id="item-price" type="number" min="0" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500" value="50">
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="text-[10px] text-neutral-500 font-bold uppercase">Icon (Emoji)</label>
+                        <input id="item-icon" type="text" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500" placeholder="🧪" maxlength="2">
+                    </div>
+                    
+                    <div>
+                        <label class="text-[10px] text-neutral-500 font-bold uppercase">Description</label>
+                        <textarea id="item-description" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500 resize-none h-20" placeholder="Restores 50 HP"></textarea>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Effect Type</label>
+                            <select id="item-effect-type" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500">
+                                <option value="">None</option>
+                                <option value="heal_hp">Heal HP</option>
+                                <option value="heal_mp">Heal MP</option>
+                                <option value="boost_atk">Boost Attack</option>
+                                <option value="boost_def">Boost Defense</option>
+                                <option value="boost_move">Boost Movement</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-neutral-500 font-bold uppercase">Effect Value</label>
+                            <input id="item-effect-value" type="number" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-green-500" value="0">
+                        </div>
+                    </div>
+                    
+                    <!-- 가챠/상점 설정 -->
+                    <div class="border-t border-white/10 pt-6 mt-6">
+                        <h4 class="text-sm font-black text-purple-400 uppercase mb-4">💎 Availability Settings</h4>
+                        
+                        <div class="space-y-4">
+                            <div class="flex items-center gap-3">
+                                <input type="checkbox" id="item-in-gacha" class="w-4 h-4 rounded bg-black border-white/20">
+                                <label for="item-in-gacha" class="text-sm text-white">Include in Gacha</label>
+                            </div>
+                            
+                            <div id="gacha-settings" class="ml-7 space-y-3 hidden">
+                                <div>
+                                    <label class="text-[10px] text-neutral-500 font-bold uppercase">Gacha Drop Rate (%)</label>
+                                    <input id="item-gacha-chance" type="number" min="0" max="100" step="0.1" class="w-full bg-black border border-purple-500/30 rounded-xl px-4 py-3 text-sm text-purple-400 outline-none focus:border-purple-500" value="5">
+                                    <p class="text-[9px] text-neutral-600 mt-1">총 확률이 100%가 되도록 조정하세요</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-center gap-3">
+                                <input type="checkbox" id="item-in-shop" class="w-4 h-4 rounded bg-black border-white/20">
+                                <label for="item-in-shop" class="text-sm text-white">Available in Shop</label>
+                            </div>
+                            
+                            <div class="flex items-center gap-3">
+                                <input type="checkbox" id="item-unavailable" class="w-4 h-4 rounded bg-black border-white/20">
+                                <label for="item-unavailable" class="text-sm text-neutral-500">Currently Unavailable (미판매)</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex gap-4 mt-8">
+                    <button onclick="closeItemMasterModal()" class="flex-1 py-4 bg-neutral-800 text-neutral-400 font-bold rounded-xl uppercase text-xs hover:text-white">Cancel</button>
+                    <button onclick="saveItemMaster()" class="flex-1 py-4 bg-green-600 text-white font-bold rounded-xl uppercase text-xs hover:bg-green-700 shadow-lg">Save Item</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 관리자 인벤토리 관리 모달 -->
+        <div id="admin-inventory-modal" class="hidden fixed inset-0 z-[130] bg-black/95 flex items-center justify-center p-6 backdrop-blur-xl">
+            <div class="w-full max-w-4xl bg-neutral-900 border border-green-600/30 rounded-[3rem] p-10 shadow-2xl modal-enter max-h-[90vh] overflow-y-auto custom-scrollbar">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-2xl font-black text-white uppercase tracking-tighter">User Inventory Manager</h3>
+                    <button onclick="closeAdminInventoryModal()" class="text-neutral-500 hover:text-white">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                
+                <div id="admin-inventory-content" class="space-y-6">
+                    <p class="text-neutral-500 text-sm text-center py-10">Loading...</p>
+                </div>
+            </div>
+        </div>
+        
         <div id="admin-reply-modal" class="hidden fixed inset-0 z-[130] bg-black/95 flex items-center justify-center p-6 backdrop-blur-xl">
             <div class="w-full max-w-md bg-neutral-900 border border-amber-600/30 rounded-[3rem] p-10 shadow-2xl modal-enter">
                 <h3 class="text-xl font-serif font-black text-white uppercase tracking-tighter mb-4 text-center">Confirm & Reply</h3>
@@ -1919,6 +2338,7 @@ window.filterGroupMembers = () => {
     // 4. 후처리: 서브 컴포넌트 렌더링 및 아이콘 로드
     if (window.updateAdminReportsUI) window.updateAdminReportsUI();
     if (window.loadUserInvestigationProgress) window.loadUserInvestigationProgress();
+    if (window.loadItemMasterList) window.loadItemMasterList(); // 아이템 마스터 목록 로드
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 // [추가] 관리자 페이지에 신고 목록 그리기
@@ -1959,6 +2379,299 @@ window.updateAdminReportsUI = () => {
     
     if (typeof lucide !== 'undefined') lucide.createIcons();
 };
+
+/* ============================================
+   아이템 마스터 관리 시스템
+   ============================================ */
+
+// 아이템 마스터 목록 로드
+window.loadItemMasterList = async () => {
+    try {
+        const itemsRef = collection(db, 'artifacts', appId, 'public', 'data', 'item_master');
+        const snapshot = await getDocs(itemsRef);
+        
+        const container = document.getElementById('item-master-list');
+        if (!container) return;
+        
+        if (snapshot.empty) {
+            container.innerHTML = '<p class="text-neutral-500 text-xs italic text-center col-span-full py-10">No items in database. Click "+ Add Item" to create one.</p>';
+            return;
+        }
+        
+        const itemsHtml = snapshot.docs.map(doc => {
+            const item = doc.data();
+            const rarityColor = item.rarity >= 5 ? 'text-amber-400 border-amber-500/50 bg-amber-900/20' : 
+                               (item.rarity === 4 ? 'text-purple-400 border-purple-500/50 bg-purple-900/20' : 
+                               (item.rarity === 3 ? 'text-blue-400 border-blue-500/50 bg-blue-900/20' : 'text-neutral-400 border-white/10 bg-white/5'));
+            
+            return `
+                <div class="p-4 ${rarityColor} border-2 rounded-2xl group hover:scale-105 transition-all">
+                    <div class="flex items-start justify-between mb-3">
+                        <span class="text-4xl">${item.icon || '📦'}</span>
+                        <div class="flex gap-1">
+                            <button onclick="editItemMaster('${doc.id}')" class="w-6 h-6 rounded bg-white/10 flex items-center justify-center hover:bg-amber-600 text-white/50 hover:text-white transition-all">
+                                <i data-lucide="edit-2" class="w-3 h-3"></i>
+                            </button>
+                            <button onclick="deleteItemMaster('${doc.id}')" class="w-6 h-6 rounded bg-white/10 flex items-center justify-center hover:bg-red-600 text-white/50 hover:text-white transition-all">
+                                <i data-lucide="trash-2" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <h4 class="text-sm font-bold mb-1">${item.name}</h4>
+                    <p class="text-[9px] opacity-60 mb-2">${item.description || ''}</p>
+                    <div class="flex justify-between items-center text-[8px] uppercase font-mono">
+                        <span class="opacity-60">${item.type}</span>
+                        <span class="font-bold">${item.price} coins</span>
+                    </div>
+                    <div class="mt-2 text-[8px] opacity-60">
+                        ${"★".repeat(item.rarity)}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        container.innerHTML = itemsHtml;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch(e) {
+        console.error("Failed to load item master list:", e);
+    }
+};
+
+// 아이템 마스터 모달 열기
+window.openItemMasterModal = (itemId = null) => {
+    const modal = document.getElementById('item-master-modal');
+    modal.classList.remove('hidden');
+    
+    // 편집 모드인 경우 데이터 로드
+    if (itemId) {
+        loadItemMasterData(itemId);
+    } else {
+        // 새로 만들기 모드 - 필드 초기화
+        document.getElementById('item-id').value = '';
+        document.getElementById('item-name').value = '';
+        document.getElementById('item-type').value = 'consumable';
+        document.getElementById('item-rarity').value = '3';
+        document.getElementById('item-price').value = '50';
+        document.getElementById('item-icon').value = '';
+        document.getElementById('item-description').value = '';
+        document.getElementById('item-effect-type').value = '';
+        document.getElementById('item-effect-value').value = '0';
+        document.getElementById('item-in-gacha').checked = false;
+        document.getElementById('item-in-shop').checked = false;
+        document.getElementById('item-unavailable').checked = false;
+        document.getElementById('item-gacha-chance').value = '5';
+        document.getElementById('gacha-settings').classList.add('hidden');
+    }
+    
+    // 가챠 체크박스 이벤트 리스너 (매번 새로 추가)
+    const gachaCheckbox = document.getElementById('item-in-gacha');
+    const gachaSettings = document.getElementById('gacha-settings');
+    gachaCheckbox.onchange = () => {
+        if (gachaCheckbox.checked) {
+            gachaSettings.classList.remove('hidden');
+        } else {
+            gachaSettings.classList.add('hidden');
+        }
+    };
+};
+
+// 아이템 마스터 데이터 로드 (편집용)
+async function loadItemMasterData(itemId) {
+    try {
+        const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'item_master', itemId);
+        const itemSnap = await getDoc(itemRef);
+        
+        if (!itemSnap.exists()) {
+            showToast("Item not found!");
+            return;
+        }
+        
+        const item = itemSnap.data();
+        document.getElementById('item-id').value = itemId;
+        document.getElementById('item-name').value = item.name || '';
+        document.getElementById('item-type').value = item.type || 'consumable';
+        document.getElementById('item-rarity').value = item.rarity || 3;
+        document.getElementById('item-price').value = item.price || 50;
+        document.getElementById('item-icon').value = item.icon || '';
+        document.getElementById('item-description').value = item.description || '';
+        document.getElementById('item-effect-type').value = item.effect?.type || '';
+        document.getElementById('item-effect-value').value = item.effect?.value || 0;
+        
+        // 가챠/상점 설정 로드
+        document.getElementById('item-in-gacha').checked = item.availability?.inGacha || false;
+        document.getElementById('item-in-shop').checked = item.availability?.inShop || false;
+        document.getElementById('item-unavailable').checked = item.availability?.unavailable || false;
+        document.getElementById('item-gacha-chance').value = item.gachaChance || 5;
+        
+        // 가챠 설정 표시/숨김
+        const gachaSettings = document.getElementById('gacha-settings');
+        if (item.availability?.inGacha) {
+            gachaSettings.classList.remove('hidden');
+        } else {
+            gachaSettings.classList.add('hidden');
+        }
+    } catch(e) {
+        console.error("Failed to load item data:", e);
+        showToast("Error loading item!");
+    }
+}
+
+// 아이템 마스터 저장
+window.saveItemMaster = async () => {
+    const itemId = document.getElementById('item-id').value.trim();
+    const itemName = document.getElementById('item-name').value.trim();
+    
+    if (!itemId || !itemName) {
+        showToast("Item ID and Name are required!");
+        return;
+    }
+    
+    const inGacha = document.getElementById('item-in-gacha').checked;
+    const inShop = document.getElementById('item-in-shop').checked;
+    const unavailable = document.getElementById('item-unavailable').checked;
+    
+    const itemData = {
+        id: itemId,
+        name: itemName,
+        type: document.getElementById('item-type').value,
+        rarity: parseInt(document.getElementById('item-rarity').value) || 3,
+        price: parseInt(document.getElementById('item-price').value) || 0,
+        icon: document.getElementById('item-icon').value.trim() || '📦',
+        description: document.getElementById('item-description').value.trim(),
+        effect: {
+            type: document.getElementById('item-effect-type').value,
+            value: parseInt(document.getElementById('item-effect-value').value) || 0
+        },
+        availability: {
+            inGacha: inGacha,
+            inShop: inShop,
+            unavailable: unavailable
+        },
+        gachaChance: inGacha ? parseFloat(document.getElementById('item-gacha-chance').value) || 5 : 0,
+        updatedAt: serverTimestamp()
+    };
+    
+    try {
+        const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'item_master', itemId);
+        await setDoc(itemRef, itemData);
+        
+        showToast("Item saved successfully!");
+        closeItemMasterModal();
+        loadItemMasterList();
+    } catch(e) {
+        console.error("Failed to save item:", e);
+        showToast("Error saving item!");
+    }
+};
+
+// 아이템 마스터 편집
+window.editItemMaster = (itemId) => {
+    openItemMasterModal(itemId);
+};
+
+// 아이템 마스터 삭제
+window.deleteItemMaster = async (itemId) => {
+    if (!confirm("Are you sure you want to delete this item?")) return;
+    
+    try {
+        const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'item_master', itemId);
+        await deleteDoc(itemRef);
+        
+        showToast("Item deleted successfully!");
+        loadItemMasterList();
+    } catch(e) {
+        console.error("Failed to delete item:", e);
+        showToast("Error deleting item!");
+    }
+};
+
+// 기본 가챠 아이템 초기화
+window.initializeDefaultItems = async () => {
+    if (!confirm("기본 가챠 아이템 3개를 생성하시겠습니까?\n(Golden Fleece, Silver Sword, Ration Pack)")) return;
+    
+    const defaultItems = [
+        {
+            id: "gacha_golden_fleece",
+            name: "5★ Golden Fleece",
+            type: "quest",
+            rarity: 5,
+            price: 0,
+            icon: "🏆",
+            description: "전설적인 황금 양털. 극도로 희귀한 아이템입니다.",
+            effect: { type: "", value: 0 },
+            availability: {
+                inGacha: true,
+                inShop: false,
+                unavailable: false
+            },
+            gachaChance: 5,
+            updatedAt: serverTimestamp()
+        },
+        {
+            id: "gacha_silver_sword",
+            name: "4★ Silver Sword",
+            type: "equipment",
+            rarity: 4,
+            price: 500,
+            icon: "⚔️",
+            description: "은으로 만들어진 검. 우수한 품질의 무기입니다.",
+            effect: { type: "boost_atk", value: 10 },
+            availability: {
+                inGacha: true,
+                inShop: true,
+                unavailable: false
+            },
+            gachaChance: 20,
+            updatedAt: serverTimestamp()
+        },
+        {
+            id: "gacha_ration_pack",
+            name: "3★ Ration Pack",
+            type: "consumable",
+            rarity: 3,
+            price: 50,
+            icon: "🍞",
+            description: "기본 식량 팩. 흔하게 얻을 수 있습니다.",
+            effect: { type: "heal_hp", value: 30 },
+            availability: {
+                inGacha: true,
+                inShop: true,
+                unavailable: false
+            },
+            gachaChance: 75,
+            updatedAt: serverTimestamp()
+        }
+    ];
+    
+    try {
+        let created = 0;
+        let skipped = 0;
+        
+        for (const item of defaultItems) {
+            const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'item_master', item.id);
+            const itemSnap = await getDoc(itemRef);
+            
+            if (!itemSnap.exists()) {
+                await setDoc(itemRef, item);
+                created++;
+            } else {
+                skipped++;
+            }
+        }
+        
+        showToast(`✅ 생성: ${created}개, 스킵: ${skipped}개 (이미 존재)`);
+        loadItemMasterList();
+    } catch(e) {
+        console.error("Failed to initialize default items:", e);
+        showToast("Error initializing items!");
+    }
+};
+
+// 모달 닫기
+window.closeItemMasterModal = () => {
+    document.getElementById('item-master-modal').classList.add('hidden');
+};
+
 // [추가됨] 채팅방 아이콘 생성 함수 (최대 4명 프사 표시)
 function getRoomIconHTML(room) {
     const myId = state.userAccount.loginId;
@@ -2083,6 +2796,11 @@ function getRoomIconHTML(room) {
                 </div>
                 
                 <div>
+                    <label class="text-[10px] font-bold text-amber-500 uppercase block mb-1">💰 Coins</label>
+                    <input id="admin-coins" type="number" value="${acc.coins || 0}" class="w-full bg-black border border-amber-500/30 rounded-xl px-4 py-3 text-xs text-amber-500 font-bold font-mono">
+                </div>
+                
+                <div>
                     <label class="text-[10px] font-bold text-neutral-500 uppercase block mb-1">Name</label>
                     <input id="admin-ocname" value="${acc.ocName || ''}" class="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-xs text-white font-bold">
                 </div>
@@ -2123,6 +2841,19 @@ function getRoomIconHTML(room) {
             <div>
                 <h4 class="text-xs font-black text-neutral-500 uppercase tracking-widest border-l-4 border-neutral-600 pl-3 mb-4">Details</h4>
                 <textarea id="admin-stats" class="w-full bg-black border border-white/10 rounded-xl px-6 py-4 text-xs text-white h-32 resize-none custom-scrollbar leading-relaxed">${acc.stats || ''}</textarea>
+            </div>
+            
+            <!-- 인벤토리 관리 섹션 -->
+            <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                    <h4 class="text-xs font-black text-green-500 uppercase tracking-widest border-l-4 border-green-600 pl-3">Inventory Management</h4>
+                    <button onclick="openAdminInventoryManager('${acc.loginId}')" class="px-4 py-2 bg-green-900/30 text-green-400 border border-green-500/30 rounded-lg text-[9px] font-bold uppercase hover:bg-green-600 hover:text-white transition-all">
+                        <i data-lucide="package" class="w-3 h-3 inline mr-1"></i> Manage Items
+                    </button>
+                </div>
+                <div id="admin-inventory-preview-${acc.loginId}" class="bg-black/50 border border-white/5 rounded-xl p-4 min-h-[60px]">
+                    <p class="text-neutral-600 text-[10px] italic">Click "Manage Items" to view and edit inventory</p>
+                </div>
             </div>
         </div>
         
@@ -2426,13 +3157,10 @@ window.handleAdminUpdate = async (loginId) => {
         const data = { 
             role: getVal('admin-role'),
             position: getVal('admin-position'), 
-    email: getVal('admin-email'),
-    badgeText: getVal('admin-badge'),
-    ocName: getVal('admin-ocname'),
             email: getVal('admin-email'),
             badgeText: getVal('admin-badge'),
-            ocName: getVal('admin-ocname'), 
-            profile: getVal('admin-profile'), // 이 부분의 ID가 'admin-profile'이어야 합니다.
+            ocName: getVal('admin-ocname'),
+            profile: getVal('admin-profile'),
             slogan: getVal('admin-slogan'), 
             shortDesc: getVal('admin-shortDesc'),
             linkText: getVal('admin-linkText'),
@@ -2440,17 +3168,36 @@ window.handleAdminUpdate = async (loginId) => {
             keyword1: getVal('admin-kw1'),
             keyword2: getVal('admin-kw2'),
             keyword3: getVal('admin-kw3'),
-            stats: getVal('admin-stats') 
+            stats: getVal('admin-stats'),
+            coins: parseInt(getVal('admin-coins')) || 0
         };
 
+        // accounts 컬렉션에 저장
         const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
         await setDoc(accountRef, data, { merge: true });
+        
+        // users 컬렉션에도 코인 업데이트 (uid로 찾아서)
+        const targetAccount = state.accounts.find(a => a.loginId === loginId);
+        if (targetAccount && targetAccount.uid) {
+            const userRef = doc(db, 'artifacts', appId, 'users', targetAccount.uid);
+            await setDoc(userRef, { 
+                loginId: loginId,
+                coins: data.coins 
+            }, { merge: true });
+        }
 
         document.getElementById('admin-edit-modal').classList.add('hidden');
         showToast("Record Synchronized.");
         
         const idx = state.accounts.findIndex(a => a.loginId === loginId);
-        if (idx !== -1) state.accounts[idx] = { ...state.accounts[idx], ...data };
+        if (idx !== -1) {
+            state.accounts[idx] = { ...state.accounts[idx], ...data };
+            // 현재 사용자가 편집된 경우 로컬 state도 업데이트
+            if (loginId === state.userAccount?.loginId) {
+                state.userAccount = state.accounts[idx];
+                updateProfileBarUI();
+            }
+        }
 
     } catch (e) {
         console.error("저장 중 에러 발생:", e);
@@ -2841,8 +3588,99 @@ window.handleSystemUpdate = async () => {
 };
 
         window.handleAdminAuth = () => { if ($('admin-pw-input').value === ADMIN_PW) { state.isAdmin = true; renderView('admin'); } else showToast("Access Denied."); };
-        window.approveUser = async (id) => { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', id), { status: 'approved' }, { merge: true }); showToast("Authorized."); };
+        window.approveUser = async (id) => { 
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', id), { 
+                status: 'approved',
+                currentHP: 100,  // 초기 HP 설정
+                currentMP: 50    // 초기 MP 설정
+            }, { merge: true }); 
+            showToast("Authorized."); 
+        };
         window.rejectUser = async (id) => { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', id), { status: 'rejected' }, { merge: true }); };
+
+        // HP/MP 관리 함수들
+        window.updateUserHPMP = async (loginId) => {
+            try {
+                const currentHP = parseInt(document.getElementById(`hp-current-${loginId}`).value);
+                const currentMP = parseInt(document.getElementById(`mp-current-${loginId}`).value);
+                
+                if (isNaN(currentHP) || isNaN(currentMP)) {
+                    showToast("Invalid HP/MP values!");
+                    return;
+                }
+                
+                const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+                await setDoc(accountRef, {
+                    currentHP: currentHP,
+                    currentMP: currentMP,
+                    lastBattleAt: serverTimestamp()
+                }, { merge: true });
+                
+                showToast(`✅ ${loginId} HP/MP updated!`);
+                console.log(`✅ 관리자가 ${loginId}의 HP/MP 업데이트: HP=${currentHP}, MP=${currentMP}`);
+            } catch(e) {
+                console.error("HP/MP 업데이트 실패:", e);
+                showToast("Update failed!");
+            }
+        };
+
+        window.resetAllHP = async () => {
+            if (!confirm("모든 유저의 HP를 최대치로 복구하시겠습니까?")) return;
+            
+            try {
+                const approveds = state.accounts.filter(a => a.status === 'approved');
+                const promises = approveds.map(async (a) => {
+                    const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', a.loginId);
+                    await setDoc(accountRef, {
+                        currentHP: parseInt(a.stat_hp) || 100,
+                        lastBattleAt: serverTimestamp()
+                    }, { merge: true });
+                });
+                
+                await Promise.all(promises);
+                showToast("✅ All HP reset to max!");
+                renderAdmin(); // 화면 새로고침
+            } catch(e) {
+                console.error("HP 리셋 실패:", e);
+                showToast("Reset failed!");
+            }
+        };
+
+        window.resetAllMP = async () => {
+            if (!confirm("모든 유저의 MP를 최대치로 복구하시겠습니까?")) return;
+            
+            try {
+                const approveds = state.accounts.filter(a => a.status === 'approved');
+                const promises = approveds.map(async (a) => {
+                    const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', a.loginId);
+                    await setDoc(accountRef, {
+                        currentMP: parseInt(a.stat_mp) || 50,
+                        lastBattleAt: serverTimestamp()
+                    }, { merge: true });
+                });
+                
+                await Promise.all(promises);
+                showToast("✅ All MP reset to max!");
+                renderAdmin(); // 화면 새로고침
+            } catch(e) {
+                console.error("MP 리셋 실패:", e);
+                showToast("Reset failed!");
+            }
+        };
+
+        // HP/MP 섹션 토글
+        window.toggleHPMPSection = () => {
+            const content = document.getElementById('hpmp-content');
+            const icon = document.getElementById('hpmp-toggle-icon');
+            
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                icon.style.transform = 'rotate(0deg)';
+            } else {
+                content.classList.add('hidden');
+                icon.style.transform = 'rotate(-90deg)';
+            }
+        };
 
         function showAuthGate() {
     const gate = $('auth-view');
@@ -2886,7 +3724,9 @@ window.handleSystemUpdate = async () => {
                             uid: state.user.uid, loginId: id, password: pw, ocName: ocName,
                             profile: "https://cdn.pixabay.com/photo/2012/04/18/18/16/man-37470_1280.png",
                             slogan: "캐치프레이즈를 입력하세요", status: 'pending', level: 30, createdAt: serverTimestamp(),
-                            stats: "이곳에 캐릭터의 설명을 적습니다."
+                            stats: "이곳에 캐릭터의 설명을 적습니다.",
+                            currentHP: 100,  // 초기 HP
+                            currentMP: 50    // 초기 MP
                         });
                         showPendingGateUI();
                     } catch(e) { console.error(e); }
@@ -2995,12 +3835,36 @@ window.handleSystemUpdate = async () => {
             if (!acc || acc.status === 'new') return;
             $('user-name-display').innerText = acc.ocName || 'Personnel';
             $('user-id-display').innerText = `ID: ${acc.loginId || 'Guest'}`;
+            $('user-coins-display').innerText = acc.coins || 0;
             if (acc.profile) {
                 $('user-avatar').src = acc.profile;
                 $('user-avatar').classList.remove('hidden');
                 $('user-avatar-placeholder').classList.add('hidden');
             }
         }
+        
+        // [추가] 코인 동기화 헬퍼 함수 - users와 accounts 컬렉션 양쪽 업데이트
+        window.syncUserCoins = async (uid, loginId, newCoins) => {
+            try {
+                // 1. users 컬렉션 업데이트 (uid 기준)
+                const userRef = doc(db, 'artifacts', appId, 'users', uid);
+                await setDoc(userRef, { coins: newCoins }, { merge: true });
+                
+                // 2. accounts 컬렉션 업데이트 (loginId 기준)
+                const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+                await setDoc(accountRef, { coins: newCoins }, { merge: true });
+                
+                // 3. 로컬 state 업데이트
+                state.userAccount.coins = newCoins;
+                updateProfileBarUI();
+                
+                console.log(`✅ 코인 동기화 완료: ${newCoins} coins`);
+            } catch(e) {
+                console.error("❌ 코인 동기화 실패:", e);
+                throw e;
+            }
+        };
+        
         window.autoResize = (textarea) => {
     textarea.style.height = 'auto'; // 높이 초기화
     textarea.style.height = textarea.scrollHeight + 'px'; // 내용만큼 늘림
@@ -3014,6 +3878,9 @@ window.handleSystemUpdate = async () => {
             t.classList.remove('hidden');
             setTimeout(() => t.classList.add('hidden'), 3000);
         }
+        
+        // showToast를 전역으로 노출
+        window.showToast = showToast;
         // [추가] 메시지 삭제 함수 (Soft Delete)
 window.deleteMessage = async (msgId) => {
     if (!confirm("이 메시지를 삭제하시겠습니까?")) return;
@@ -3094,9 +3961,9 @@ function renderVisitProfile() {
                     <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest group-hover:text-white bg-black/50 px-2 py-1 rounded">1:1 Message</span>
                 </button>
 
-                <button onclick="showToast('Gift System: Not Available Yet.')" class="group flex flex-col items-end gap-2 transition-all hover:-translate-x-2">
-                    <div class="w-14 h-14 rounded-full bg-neutral-900/80 border border-white/10 flex items-center justify-center shadow-2xl group-hover:border-amber-500 group-hover:bg-amber-600/20 transition-all">
-                        <i data-lucide="gift" class="w-6 h-6 text-white group-hover:text-amber-500"></i>
+                <button onclick="openGiftModal('${targetUser.loginId}')" class="group flex flex-col items-end gap-2 transition-all hover:-translate-x-2">
+                    <div class="w-14 h-14 rounded-full bg-neutral-900/80 border border-white/10 flex items-center justify-center shadow-2xl group-hover:border-purple-500 group-hover:bg-purple-600/20 transition-all">
+                        <i data-lucide="gift" class="w-6 h-6 text-white group-hover:text-purple-500"></i>
                     </div>
                     <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest group-hover:text-white bg-black/50 px-2 py-1 rounded">Send Gift</span>
                 </button>
@@ -3137,6 +4004,27 @@ function renderVisitProfile() {
                     <button onclick="document.getElementById('report-modal').classList.add('hidden')" class="flex-1 py-4 bg-neutral-800 text-neutral-400 font-bold rounded-xl uppercase text-xs hover:text-white">Cancel</button>
                     <button onclick="submitReport()" class="flex-1 py-4 bg-red-700 text-white font-bold rounded-xl uppercase text-xs hover:bg-red-600 shadow-lg shadow-red-900/20">Submit Report</button>
                 </div>
+            </div>
+        </div>
+        
+        <!-- 선물 모달 -->
+        <div id="gift-modal" class="hidden fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-6 backdrop-blur-xl">
+            <div class="w-full max-w-3xl bg-neutral-900 border border-purple-600/30 rounded-3xl p-10 shadow-2xl">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-2xl font-black text-white uppercase">Send Gift</h3>
+                    <button onclick="closeGiftModal()" class="text-neutral-500 hover:text-white">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                
+                <p class="text-sm text-neutral-400 mb-4">Select an item from your inventory to send as a gift:</p>
+                
+                <div id="gift-items-list" class="grid grid-cols-5 gap-3 mb-6 max-h-96 overflow-y-auto custom-scrollbar">
+                </div>
+                
+                <button onclick="sendGift()" class="w-full py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl uppercase">
+                    Confirm & Send Gift
+                </button>
             </div>
         </div>
         
@@ -3383,6 +4271,14 @@ function renderOperation() {
                 icon: 'swords',
                 action: "openRaidBoard()",
                 number: '03'
+            },{
+                id: 'op_minigame',
+                title: 'Arcade',
+                desc: 'Challenge others or test your luck in the void.',
+                img: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1000', // 게임/아케이드 느낌 이미지
+                icon: 'dices', // Lucide 아이콘 (없으면 gamepad2 등 사용)
+                action: "openMiniGameHub()",
+                number: '04'
             }
         ];
     }
@@ -3403,7 +4299,7 @@ function renderOperation() {
                     </h2>
                     <div class="flex items-center gap-3 mt-4">
                         <span class="w-8 h-[2px] bg-amber-600"></span>
-                        <p class="text-[10px] text-amber-500 font-bold tracking-[0.3em] uppercase">Active Missions & Investigations</p>
+                        <p class="text-[10px] text-amber-500 font-bold tracking-[0.3em] uppercase">Active Missions & Arcade</p>
                     </div>
                 </div>
                 <div class="hidden md:block text-right opacity-50">
@@ -3519,9 +4415,1068 @@ function renderOperation() {
         </div>
     `;
     if (typeof lucide !== 'undefined') lucide.createIcons();
-}
+};
 window.renderOperation = renderOperation;
+window.openMiniGameHub = () => {
+    const contentArea = document.getElementById('content-area');
+    contentArea.innerHTML = `
+        <div class="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden animate-fade-in relative h-full select-none items-center justify-center">
+            
+            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagmonds-light.png')] opacity-5 pointer-events-none"></div>
+            
+            <div class="z-10 text-center mb-12">
+                <h2 class="text-5xl font-serif font-black text-white uppercase tracking-tighter italic drop-shadow-[0_0_15px_rgba(217,119,6,0.5)]">
+                    Arcade Center
+                </h2>
+                <p class="text-[10px] text-amber-500 font-bold tracking-[0.5em] mt-2 uppercase">Select Your Game</p>
+            </div>
 
+            <div class="flex flex-wrap gap-8 z-10 justify-center max-w-6xl">
+                <!-- 가위바위보 -->
+                <button onclick="renderRPS()" class="group relative w-64 h-80 bg-neutral-900 border border-white/10 rounded-2xl hover:border-amber-500/50 hover:-translate-y-2 transition-all duration-300 overflow-hidden shadow-2xl">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-10"></div>
+                    <img src="https://images.unsplash.com/photo-1623934199716-dc28818a6ec7?q=80&w=1000" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-110 transition-transform duration-700 grayscale group-hover:grayscale-0">
+                    <div class="absolute bottom-0 left-0 w-full p-6 z-20 text-left">
+                        <div class="w-12 h-12 bg-amber-600 rounded-full flex items-center justify-center mb-4 text-white shadow-lg">
+                            <i data-lucide="hand" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-black text-white uppercase italic">Duel: RPS</h3>
+                        <p class="text-[10px] text-neutral-400 mt-2">Challenge other personnel in a battle of wits.</p>
+                        <div class="mt-3 text-[9px] text-amber-500 font-mono">Reward: 5 Coins</div>
+                    </div>
+                </button>
+
+                <!-- 가챠 -->
+                <button onclick="renderGacha()" class="group relative w-64 h-80 bg-neutral-900 border border-white/10 rounded-2xl hover:border-purple-500/50 hover:-translate-y-2 transition-all duration-300 overflow-hidden shadow-2xl">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-10"></div>
+                    <img src="https://images.unsplash.com/photo-1605218427306-635ba249f37c?q=80&w=1000" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-110 transition-transform duration-700 grayscale group-hover:grayscale-0">
+                    <div class="absolute bottom-0 left-0 w-full p-6 z-20 text-left">
+                        <div class="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center mb-4 text-white shadow-lg">
+                            <i data-lucide="sparkles" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-black text-white uppercase italic">Wheel of Fate</h3>
+                        <p class="text-[10px] text-neutral-400 mt-2">Spin the roulette. Admin managed rewards.</p>
+                        <div class="mt-3 text-[9px] text-purple-500 font-mono">Cost: 10 Coins</div>
+                    </div>
+                </button>
+
+                <!-- 슬롯머신 -->
+                <button onclick="renderSlots()" class="group relative w-64 h-80 bg-neutral-900 border border-white/10 rounded-2xl hover:border-green-500/50 hover:-translate-y-2 transition-all duration-300 overflow-hidden shadow-2xl">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-10"></div>
+                    <img src="https://images.unsplash.com/photo-1596838132731-3301c3fd4317?q=80&w=1000" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-110 transition-transform duration-700 grayscale group-hover:grayscale-0">
+                    <div class="absolute bottom-0 left-0 w-full p-6 z-20 text-left">
+                        <div class="w-12 h-12 bg-green-600 rounded-full flex items-center justify-center mb-4 text-white shadow-lg">
+                            <i data-lucide="cherry" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-black text-white uppercase italic">Lucky 777</h3>
+                        <p class="text-[10px] text-neutral-400 mt-2">Spin the slots. Hit the jackpot!</p>
+                        <div class="mt-3 text-[9px] text-green-500 font-mono">Cost: 10 Coins | Max: 3x</div>
+                    </div>
+                </button>
+                
+                <!-- 상점 -->
+                <button onclick="renderShop()" class="group relative w-64 h-80 bg-neutral-900 border border-white/10 rounded-2xl hover:border-amber-500/50 hover:-translate-y-2 transition-all duration-300 overflow-hidden shadow-2xl">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-10"></div>
+                    <img src="https://images.unsplash.com/photo-1441986300917-64674bd600d8?q=80&w=1000" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-110 transition-transform duration-700 grayscale group-hover:grayscale-0">
+                    <div class="absolute bottom-0 left-0 w-full p-6 z-20 text-left">
+                        <div class="w-12 h-12 bg-amber-600 rounded-full flex items-center justify-center mb-4 text-white shadow-lg">
+                            <i data-lucide="shopping-bag" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-black text-white uppercase italic">Merchant's Shop</h3>
+                        <p class="text-[10px] text-neutral-400 mt-2">Buy items with coins</p>
+                        <div class="mt-3 text-[9px] text-amber-500 font-mono">Various Items Available</div>
+                    </div>
+                </button>
+            </div>
+
+            <button onclick="renderOperation()" class="absolute top-8 left-8 flex items-center gap-2 text-neutral-500 hover:text-white transition-colors z-50 px-4 py-2 border border-white/10 rounded-lg bg-black/50">
+                <i data-lucide="arrow-left" class="w-4 h-4"></i> <span class="text-xs font-bold uppercase">Back to Ops</span>
+            </button>
+        </div>
+    `;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+};
+
+/* -----------------------------------------
+   2. 가위바위보 (RPS) - 실시간 HP 배틀 시스템
+   ----------------------------------------- */
+let rpsUnsub = null;
+let rpsGameUnsub = null;
+
+window.renderRPS = () => {
+    const contentArea = document.getElementById('content-area');
+    contentArea.innerHTML = `
+        <div class="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden animate-fade-in relative h-full">
+            <div class="p-8 border-b border-white/5 flex justify-between items-center bg-neutral-900/50 backdrop-blur-md z-10">
+                <div>
+                    <h2 class="text-3xl font-black text-amber-500 uppercase italic tracking-tighter">RPS Battle Arena</h2>
+                    <p class="text-[10px] text-neutral-500 uppercase tracking-widest mt-1">Real-time HP Battle System</p>
+                </div>
+                <button onclick="openMiniGameHub()" class="px-4 py-2 border border-white/10 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all">EXIT</button>
+            </div>
+
+            <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
+                <div class="w-full md:w-1/3 border-r border-white/5 bg-black/20 flex flex-col">
+                    <div class="p-4 border-b border-white/5 flex justify-between items-center">
+                        <span class="text-xs font-bold text-white uppercase">Active Battles</span>
+                        <button onclick="createRPSBattle()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-[10px] font-bold uppercase transition-all shadow-lg">+ Create</button>
+                    </div>
+                    <div id="rps-lobby-list" class="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                        <p class="text-center text-[10px] text-neutral-600 py-10">Scanning...</p>
+                    </div>
+                </div>
+
+                <div id="rps-stage" class="flex-1 flex flex-col items-center justify-center p-10 relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
+                    <div class="text-center opacity-30">
+                        <i data-lucide="swords" class="w-24 h-24 mx-auto text-neutral-500 mb-4"></i>
+                        <p class="text-sm font-black text-neutral-600 uppercase tracking-widest">Select a battle to begin</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    subscribeRPSLobby();
+};
+
+// Firestore 실시간 로비 구독
+function subscribeRPSLobby() {
+    if (rpsUnsub) rpsUnsub();
+    
+    const roomsRef = collection(db, 'minigames_rps_battles'); 
+    rpsUnsub = onSnapshot(roomsRef, (snapshot) => {
+        const listEl = document.getElementById('rps-lobby-list');
+        if (!listEl) return;
+
+        const rooms = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+        const activeRooms = rooms.filter(r => r.status === 'waiting' || r.status === 'ready' || r.status === 'playing');
+
+        if (activeRooms.length === 0) {
+            listEl.innerHTML = `<p class="text-center text-[10px] text-neutral-600 py-10 italic">No active battles.</p>`;
+        } else {
+            listEl.innerHTML = activeRooms.map(r => {
+                const isFull = r.player2Id;
+                const canJoin = !isFull && r.hostId !== state.userAccount.loginId;
+                
+                return `
+                <div class="p-4 bg-neutral-900 border border-white/5 rounded-xl hover:border-amber-500/50 transition-all group relative">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="flex items-center gap-2">
+                            <div class="w-6 h-6 rounded bg-amber-800 flex items-center justify-center text-[10px] font-bold text-white">P1</div>
+                            <span class="text-xs font-bold text-white">${r.hostName}</span>
+                        </div>
+                        ${isFull ? 
+                            `<span class="text-[9px] text-green-500 font-mono">IN PROGRESS</span>` : 
+                            `<span class="text-[9px] text-amber-500 font-mono animate-pulse">WAITING</span>`
+                        }
+                    </div>
+                    ${isFull ? 
+                        `<div class="flex items-center gap-2 mt-2">
+                            <div class="w-6 h-6 rounded bg-red-800 flex items-center justify-center text-[10px] font-bold text-white">P2</div>
+                            <span class="text-xs font-bold text-white">${r.player2Name}</span>
+                        </div>` : ''
+                    }
+                    ${canJoin ? 
+                        `<button onclick="joinRPSBattle('${r.id}')" class="absolute right-4 bottom-4 px-3 py-1 bg-white/5 hover:bg-amber-600 text-neutral-400 hover:text-white text-[9px] font-bold uppercase rounded border border-white/10 transition-all">Join</button>` : 
+                        (r.hostId === state.userAccount.loginId || r.player2Id === state.userAccount.loginId) ?
+                        `<button onclick="enterRPSBattle('${r.id}')" class="absolute right-4 bottom-4 px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-[9px] font-bold uppercase rounded transition-all">Enter</button>` :
+                        `<div class="absolute right-4 bottom-4 text-[9px] text-neutral-600 italic">Full</div>`
+                    }
+                </div>
+            `}).join('');
+        }
+    });
+}
+
+// 배틀 생성
+window.createRPSBattle = async () => {
+    // 이미 참여 중인 배틀이 있는지 체크
+    try {
+        const battlesRef = collection(db, 'minigames_rps_battles');
+        const q = query(battlesRef, where('status', 'in', ['waiting', 'ready', 'playing']));
+        const snapshot = await getDocs(q);
+        
+        let alreadyInBattle = false;
+        snapshot.forEach(doc => {
+            const battle = doc.data();
+            if (battle.hostId === state.userAccount.loginId || battle.player2Id === state.userAccount.loginId) {
+                alreadyInBattle = true;
+            }
+        });
+        
+        if (alreadyInBattle) {
+            showToast("You're already in a battle!");
+            return;
+        }
+        
+        const docRef = await addDoc(collection(db, 'minigames_rps_battles'), {
+            hostId: state.userAccount.loginId,
+            hostName: state.userAccount.ocName,
+            hostImage: state.userAccount.profile || 'https://cdn.pixabay.com/photo/2012/04/18/18/16/man-37470_1280.png',
+            hostHP: 100,
+            hostReady: false,
+            player2Id: null,
+            player2Name: null,
+            player2Image: null,
+            player2HP: 100,
+            player2Ready: false,
+            status: 'waiting',
+            round: 0,
+            hostChoice: null,
+            player2Choice: null,
+            createdAt: serverTimestamp()
+        });
+        
+        enterRPSBattle(docRef.id);
+    } catch(e) { 
+        console.error(e); 
+        showToast("Failed to create battle.");
+    }
+};
+
+// 배틀 참가
+window.joinRPSBattle = async (battleId) => {
+    // 이미 참여 중인 배틀이 있는지 체크
+    try {
+        const battlesRef = collection(db, 'minigames_rps_battles');
+        const q = query(battlesRef, where('status', 'in', ['waiting', 'ready', 'playing']));
+        const snapshot = await getDocs(q);
+        
+        let alreadyInBattle = false;
+        snapshot.forEach(doc => {
+            const battle = doc.data();
+            if (battle.hostId === state.userAccount.loginId || battle.player2Id === state.userAccount.loginId) {
+                alreadyInBattle = true;
+            }
+        });
+        
+        if (alreadyInBattle) {
+            showToast("You're already in a battle!");
+            return;
+        }
+        
+        const battleRef = doc(db, 'minigames_rps_battles', battleId);
+        await setDoc(battleRef, {
+            player2Id: state.userAccount.loginId,
+            player2Name: state.userAccount.ocName,
+            player2Image: state.userAccount.profile || 'https://cdn.pixabay.com/photo/2012/04/18/18/16/man-37470_1280.png',
+            status: 'ready'
+        }, { merge: true });
+        
+        enterRPSBattle(battleId);
+    } catch(e) { 
+        console.error(e); 
+        showToast("Failed to join battle.");
+    }
+};
+
+// 배틀 입장 (실시간 게임 화면)
+window.enterRPSBattle = (battleId) => {
+    if (rpsGameUnsub) rpsGameUnsub();
+    
+    const battleRef = doc(db, 'minigames_rps_battles', battleId);
+    
+    rpsGameUnsub = onSnapshot(battleRef, (snapshot) => {
+        if (!snapshot.exists()) {
+            renderRPS();
+            return;
+        }
+        
+        const battle = snapshot.data();
+        const isHost = battle.hostId === state.userAccount.loginId;
+        const stage = document.getElementById('rps-stage');
+        
+        // HP와 상태 표시
+        const myHP = isHost ? battle.hostHP : battle.player2HP;
+        const enemyHP = isHost ? battle.player2HP : battle.hostHP;
+        const myName = isHost ? battle.hostName : battle.player2Name;
+        const enemyName = isHost ? battle.player2Name : battle.hostName;
+        const myReady = isHost ? battle.hostReady : battle.player2Ready;
+        const enemyReady = isHost ? battle.player2Ready : battle.hostReady;
+        const myImage = isHost ? battle.hostImage : battle.player2Image;
+        const enemyImage = isHost ? battle.player2Image : battle.hostImage;
+        
+        // 게임 종료 체크
+        if (battle.status === 'finished') {
+            const winner = battle.winnerId === state.userAccount.loginId;
+            stage.innerHTML = `
+                <div class="text-center animate-fade-in">
+                    <h2 class="text-5xl font-black ${winner ? 'text-green-500' : 'text-red-500'} uppercase mb-8">
+                        ${winner ? 'VICTORY!' : 'DEFEAT'}
+                    </h2>
+                    ${winner ? '<p class="text-amber-500 font-bold text-xl mb-4">+5 Coins Awarded!</p>' : ''}
+                    <button onclick="renderRPS()" class="px-6 py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-sm font-bold uppercase">Back to Lobby</button>
+                </div>
+            `;
+            return;
+        }
+        
+        // 대기 화면 (플레이어 2 기다리는 중)
+        if (!battle.player2Id) {
+            stage.innerHTML = `
+                <div class="text-center animate-pulse">
+                    <i data-lucide="loader" class="w-16 h-16 mx-auto text-amber-500 mb-6 animate-spin"></i>
+                    <h3 class="text-2xl font-black text-white uppercase mb-4">Waiting for Opponent...</h3>
+                    <p class="text-xs text-neutral-500">Battle ID: ${battleId.substring(0, 8)}</p>
+                    <button onclick="cancelRPSBattle('${battleId}')" class="mt-8 px-4 py-2 bg-red-900/50 border border-red-500 text-red-400 rounded text-xs hover:bg-red-900 transition-all">Cancel Battle</button>
+                </div>
+            `;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            return;
+        }
+        
+        // 게임 화면 (HP 바 + 선택 UI)
+        const canChoose = battle.status === 'ready' || battle.status === 'playing';
+        const bothReady = myReady && enemyReady;
+        
+        stage.innerHTML = `
+            <div class="w-full max-w-5xl animate-fade-in">
+                <!-- 프로필 VS 화면 (격투게임 스타일) -->
+                <div class="flex justify-between items-center mb-8">
+                    <!-- 내 프로필 -->
+                    <div class="flex items-center gap-4">
+                        <div class="relative">
+                            <img src="${myImage || 'https://cdn.pixabay.com/photo/2012/04/18/18/16/man-37470_1280.png'}" class="w-24 h-24 rounded-full object-cover border-4 border-amber-500 shadow-[0_0_30px_rgba(217,119,6,0.6)]">
+                            <div class="absolute -bottom-2 -right-2 bg-amber-600 text-white text-xs font-bold px-2 py-1 rounded-full">YOU</div>
+                        </div>
+                        <div>
+                            <h3 class="text-2xl font-black text-white uppercase">${myName}</h3>
+                            <div class="flex items-center gap-2 mt-1">
+                                <div class="w-32 h-2 bg-neutral-800 rounded-full overflow-hidden">
+                                    <div class="h-full bg-gradient-to-r from-green-500 to-amber-500 transition-all duration-500" style="width: ${myHP}%"></div>
+                                </div>
+                                <span class="text-xs font-mono text-white">${myHP}/100</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-5xl font-black text-white italic opacity-50 animate-pulse">VS</div>
+                    
+                    <!-- 적 프로필 -->
+                    <div class="flex items-center gap-4 flex-row-reverse">
+                        <div class="relative">
+                            <img src="${enemyImage || 'https://cdn.pixabay.com/photo/2012/04/18/18/16/man-37470_1280.png'}" class="w-24 h-24 rounded-full object-cover border-4 border-red-500 shadow-[0_0_30px_rgba(239,68,68,0.6)]">
+                            <div class="absolute -bottom-2 -left-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">OPP</div>
+                        </div>
+                        <div class="text-right">
+                            <h3 class="text-2xl font-black text-white uppercase">${enemyName || 'Waiting...'}</h3>
+                            <div class="flex items-center gap-2 mt-1 flex-row-reverse">
+                                <div class="w-32 h-2 bg-neutral-800 rounded-full overflow-hidden">
+                                    <div class="h-full bg-gradient-to-l from-red-500 to-orange-500 transition-all duration-500" style="width: ${enemyHP}%"></div>
+                                </div>
+                                <span class="text-xs font-mono text-white">${enemyHP}/100</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 라운드 정보 -->
+                <div class="text-center mb-8">
+                    <div class="text-xs text-neutral-500 uppercase tracking-widest mb-2">Round ${battle.round + 1}</div>
+                    ${bothReady ? 
+                        '<div class="text-sm text-green-500 font-bold animate-pulse">Both players ready! Calculating...</div>' : 
+                        '<div class="text-sm text-amber-500">Waiting for selections...</div>'
+                    }
+                </div>
+                
+                <!-- 선택 UI -->
+                ${!myReady && canChoose ? `
+                <div class="text-center">
+                    <h3 class="text-xl font-black text-white uppercase mb-6">Choose Your Move</h3>
+                    <div class="flex justify-center gap-6">
+                        <button onclick="selectRPSMove('${battleId}', ${isHost}, 'rock')" class="group relative w-24 h-24 bg-neutral-900 border-2 border-white/20 rounded-2xl flex items-center justify-center hover:bg-amber-600 hover:border-amber-500 hover:scale-110 transition-all">
+                            <span class="text-5xl">✊</span>
+                            <div class="absolute -bottom-8 text-xs text-neutral-500 group-hover:text-white">Rock</div>
+                        </button>
+                        <button onclick="selectRPSMove('${battleId}', ${isHost}, 'paper')" class="group relative w-24 h-24 bg-neutral-900 border-2 border-white/20 rounded-2xl flex items-center justify-center hover:bg-amber-600 hover:border-amber-500 hover:scale-110 transition-all">
+                            <span class="text-5xl">✋</span>
+                            <div class="absolute -bottom-8 text-xs text-neutral-500 group-hover:text-white">Paper</div>
+                        </button>
+                        <button onclick="selectRPSMove('${battleId}', ${isHost}, 'scissors')" class="group relative w-24 h-24 bg-neutral-900 border-2 border-white/20 rounded-2xl flex items-center justify-center hover:bg-amber-600 hover:border-amber-500 hover:scale-110 transition-all">
+                            <span class="text-5xl">✌️</span>
+                            <div class="absolute -bottom-8 text-xs text-neutral-500 group-hover:text-white">Scissors</div>
+                        </button>
+                    </div>
+                </div>
+                ` : `
+                <div class="text-center py-12">
+                    <div class="inline-block px-8 py-4 bg-green-900/30 border border-green-500 rounded-xl">
+                        <i data-lucide="check-circle" class="w-12 h-12 mx-auto text-green-500 mb-3"></i>
+                        <p class="text-green-400 font-bold">Your move is locked!</p>
+                        <p class="text-xs text-neutral-500 mt-2">Waiting for opponent...</p>
+                    </div>
+                </div>
+                `}
+                
+                <div class="text-center mt-8">
+                    <button onclick="renderRPS()" class="text-xs text-neutral-600 hover:text-red-500 hover:underline">Leave Battle</button>
+                </div>
+            </div>
+        `;
+        
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    });
+};
+
+// 선택하기
+window.selectRPSMove = async (battleId, isHost, choice) => {
+    try {
+        const battleRef = doc(db, 'minigames_rps_battles', battleId);
+        const updateData = isHost ? 
+            { hostChoice: choice, hostReady: true } : 
+            { player2Choice: choice, player2Ready: true };
+        
+        await setDoc(battleRef, updateData, { merge: true });
+        
+        // 양쪽 다 준비되었는지 확인하고 결과 계산
+        const snapshot = await getDoc(battleRef);
+        const battle = snapshot.data();
+        
+        if (battle.hostReady && battle.player2Ready) {
+            // 결과 계산
+            setTimeout(() => calculateRPSRound(battleId), 1000);
+        }
+    } catch(e) { 
+        console.error(e); 
+    }
+};
+
+// 라운드 결과 계산
+async function calculateRPSRound(battleId) {
+    const battleRef = doc(db, 'minigames_rps_battles', battleId);
+    const snapshot = await getDoc(battleRef);
+    
+    if (!snapshot.exists()) return;
+    
+    const battle = snapshot.data();
+    const { hostChoice, player2Choice, hostHP, player2HP } = battle;
+    
+    let newHostHP = hostHP;
+    let newPlayer2HP = player2HP;
+    
+    // 승패 판정
+    if (hostChoice === player2Choice) {
+        // 무승부 - HP 변화 없음
+    } else if (
+        (hostChoice === 'rock' && player2Choice === 'scissors') ||
+        (hostChoice === 'scissors' && player2Choice === 'paper') ||
+        (hostChoice === 'paper' && player2Choice === 'rock')
+    ) {
+        // Host 승리 - Player2 HP -25
+        newPlayer2HP = Math.max(0, player2HP - 25);
+    } else {
+        // Player2 승리 - Host HP -25
+        newHostHP = Math.max(0, hostHP - 25);
+    }
+    
+    // 게임 종료 체크
+    const isFinished = newHostHP <= 0 || newPlayer2HP <= 0;
+    const winnerId = newHostHP <= 0 ? battle.player2Id : battle.hostId;
+    
+    // DB 업데이트
+    const updateData = {
+        hostHP: newHostHP,
+        player2HP: newPlayer2HP,
+        hostReady: false,
+        player2Ready: false,
+        hostChoice: null,
+        player2Choice: null,
+        round: battle.round + 1,
+        status: isFinished ? 'finished' : 'playing'
+    };
+    
+    if (isFinished) {
+        updateData.winnerId = winnerId;
+        
+        // 승자에게 코인 지급 - winnerId는 loginId이므로 accounts에서 uid를 찾음
+        const winnerAccount = state.accounts.find(a => a.loginId === winnerId);
+        if (winnerAccount && winnerAccount.uid) {
+            try {
+                const winnerRef = doc(db, 'artifacts', appId, 'users', winnerAccount.uid);
+                const winnerSnap = await getDoc(winnerRef);
+                const currentCoins = winnerSnap.exists() ? (winnerSnap.data().coins || 0) : (winnerAccount.coins || 0);
+                await syncUserCoins(winnerAccount.uid, winnerId, currentCoins + 5);
+                
+                // 현재 사용자가 승자인 경우 UI 업데이트
+                if (winnerId === state.userAccount.loginId) {
+                    showToast("+5 coins! Victory!");
+                }
+            } catch(e) {
+                console.error("상금 지급 실패:", e);
+            }
+        }
+    }
+    
+    await setDoc(battleRef, updateData, { merge: true });
+}
+
+// 배틀 취소
+window.cancelRPSBattle = async (battleId) => {
+    try {
+        await deleteDoc(doc(db, 'minigames_rps_battles', battleId));
+        renderRPS();
+    } catch(e) { 
+        console.error(e); 
+    }
+};
+
+/* -----------------------------------------
+/* -----------------------------------------
+   3. 가챠 (Gacha) 시스템
+   ----------------------------------------- */
+// 기본 가챠 목록 (DB가 비었을 때 사용)
+let gachaPool = [
+    { name: "5★ Golden Fleece", rarity: 5, chance: 5 },
+    { name: "4★ Silver Sword", rarity: 4, chance: 20 },
+    { name: "3★ Ration Pack", rarity: 3, chance: 75 }
+];
+
+window.renderGacha = async () => {
+    // Item Master에서 가챠 아이템 불러오기
+    try {
+        const itemsRef = collection(db, 'artifacts', appId, 'public', 'data', 'item_master');
+        const itemsSnap = await getDocs(itemsRef);
+        
+        const gachaItems = [];
+        itemsSnap.forEach(doc => {
+            const item = doc.data();
+            // inGacha가 true인 아이템만 가챠 풀에 추가
+            if (item.availability?.inGacha && !item.availability?.unavailable) {
+                gachaItems.push({
+                    id: item.id,
+                    name: item.name,
+                    rarity: item.rarity,
+                    chance: item.gachaChance || 5,
+                    icon: item.icon || '📦',
+                    description: item.description || ''
+                });
+            }
+        });
+        
+        // 가챠 아이템이 있으면 사용, 없으면 기본 목록 사용
+        if (gachaItems.length > 0) {
+            gachaPool = gachaItems;
+            console.log("✅ Item Master에서 가챠 풀 로드:", gachaItems.length, "개 아이템");
+        } else {
+            console.log("⚠️ 가챠 아이템이 없어 기본 풀 사용");
+        }
+    } catch(e) { 
+        console.log("Using default gacha pool:", e); 
+    }
+
+    const contentArea = document.getElementById('content-area');
+    contentArea.innerHTML = `
+        <div class="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden animate-fade-in relative h-full">
+            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
+            <div class="absolute inset-0 bg-gradient-to-r from-purple-900/20 via-black to-purple-900/20 pointer-events-none"></div>
+
+            <div class="p-8 border-b border-white/5 flex justify-between items-center bg-black/40 backdrop-blur-xl z-20">
+                <div>
+                    <h2 class="text-3xl font-black text-purple-400 uppercase italic tracking-tighter">Wheel of Fate</h2>
+                    <p class="text-[10px] text-neutral-500 uppercase tracking-widest mt-1">Probability Generator</p>
+                </div>
+                <div class="flex gap-4">
+                    <button onclick="openMiniGameHub()" class="px-4 py-2 border border-white/10 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all">EXIT</button>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+                <div id="gacha-result-area" class="hidden absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center" onclick="this.classList.add('hidden')">
+                    <div id="gacha-result-content" class="text-center transform scale-0 transition-transform duration-500">
+                        </div>
+                    <p class="text-white/30 text-[10px] mt-12 animate-pulse uppercase tracking-[0.5em]">Click anywhere to close</p>
+                </div>
+
+                <div class="relative w-96 h-96 rounded-full border-4 border-purple-900/30 flex items-center justify-center mb-12 shadow-[0_0_100px_rgba(147,51,234,0.3)]">
+                    <div class="absolute inset-0 rounded-full border border-white/10 animate-[spin_10s_linear_infinite]"></div>
+                    <div class="absolute inset-4 rounded-full border border-white/5 animate-[spin_15s_linear_infinite_reverse]"></div>
+                    
+                    <div class="text-center z-10 space-y-6">
+                        <div class="text-purple-500 mb-2 animate-bounce"><i data-lucide="sparkles" class="w-12 h-12 mx-auto"></i></div>
+                        <h3 class="text-2xl font-serif font-black text-white uppercase tracking-widest">Summon</h3>
+                        <div class="flex flex-col gap-3">
+                            <button onclick="pullGacha(1)" class="w-48 py-4 bg-white text-black font-black uppercase rounded-full hover:bg-purple-400 hover:scale-105 transition-all shadow-xl text-xs tracking-widest">
+                                Pull 1x
+                            </button>
+                            <button onclick="pullGacha(10)" class="w-48 py-4 bg-purple-900 border border-purple-500 text-white font-black uppercase rounded-full hover:bg-purple-700 hover:scale-105 transition-all shadow-xl text-xs tracking-widest">
+                                Pull 10x
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="absolute bottom-8 right-8 text-right opacity-50 bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/5">
+                    <h4 class="text-[10px] font-bold text-white uppercase mb-2 tracking-widest border-b border-white/10 pb-2">Drop Rates</h4>
+                    <ul class="text-[9px] text-neutral-400 space-y-1 font-mono">
+                        ${gachaPool.map(i => `<li>${i.name}: <span class="text-purple-400">${i.chance}%</span></li>`).join('')}
+                    </ul>
+                </div>
+                
+                <!-- 최근 뽑기 기록 -->
+                <div class="absolute bottom-8 left-8 text-left bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/5 max-w-md">
+                    <h4 class="text-[10px] font-bold text-white uppercase mb-3 tracking-widest border-b border-white/10 pb-2">Recent Pulls</h4>
+                    <div id="gacha-recent-history" class="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                        <p class="text-[9px] text-neutral-600 italic">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="gacha-admin-modal" class="hidden fixed inset-0 z-[100] bg-black/90 flex items-center justify-center backdrop-blur-md">
+            <div class="w-full max-w-lg bg-neutral-900 border border-purple-500/30 p-8 rounded-3xl shadow-2xl">
+                <h3 class="text-xl font-bold text-white mb-4 uppercase">Configuration</h3>
+                <textarea id="gacha-json-input" class="w-full h-64 bg-black border border-white/10 rounded-xl p-4 text-xs font-mono text-green-400 outline-none resize-none mb-4 custom-scrollbar">${JSON.stringify(gachaPool, null, 4)}</textarea>
+                <div class="flex gap-4">
+                    <button onclick="document.getElementById('gacha-admin-modal').classList.add('hidden')" class="flex-1 py-3 bg-neutral-800 text-neutral-400 text-xs font-bold rounded-xl hover:text-white uppercase">Cancel</button>
+                    <button onclick="saveGachaConfig()" class="flex-1 py-3 bg-purple-600 text-white text-xs font-bold rounded-xl hover:bg-purple-700 uppercase">Save Config</button>
+                </div>
+                <p class="text-[9px] text-neutral-500 mt-4 font-mono">* Format: [{"name":"Item", "rarity":5, "chance":10}, ...]</p>
+            </div>
+        </div>
+    `;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    
+    // 최근 뽑기 기록 로드
+    loadRecentGachaHistory();
+};
+
+// 가챠 실행 (로직)
+window.pullGacha = async (times) => {
+    // 코인 체크
+    const cost = times * 10;
+    const currentCoins = state.userAccount.coins || 0;
+    
+    if (currentCoins < cost) {
+        showToast(`Not enough coins! Need ${cost} coins.`);
+        return;
+    }
+    
+    // 코인 차감
+    try {
+        await syncUserCoins(state.user.uid, state.userAccount.loginId, currentCoins - cost);
+        showToast(`-${cost} coins`);
+    } catch(e) {
+        console.error(e);
+        showToast("Payment failed!");
+        return;
+    }
+    
+    const results = [];
+    for(let i=0; i<times; i++) {
+        const rand = Math.random() * 100;
+        let cumulative = 0;
+        let picked = gachaPool[gachaPool.length-1]; // 기본값 (가장 낮은 등급)
+        
+        for(const item of gachaPool) {
+            cumulative += parseFloat(item.chance);
+            if(rand <= cumulative) {
+                picked = item;
+                break;
+            }
+        }
+        results.push(picked);
+    }
+    showGachaResults(results);
+};
+
+// 결과 연출 화면
+function showGachaResults(results) {
+    const resultArea = document.getElementById('gacha-result-area');
+    const content = document.getElementById('gacha-result-content');
+    
+    // 인벤토리에 아이템 추가
+    addItemsToInventory(results);
+    
+    // 아이템 HTML 생성
+    const itemsHtml = results.map((item, idx) => {
+        // 등급별 색상
+        const colorClass = item.rarity >= 5 ? 'text-amber-400 border-amber-500/50 bg-amber-900/40 shadow-[0_0_30px_rgba(245,158,11,0.4)]' : 
+                           (item.rarity === 4 ? 'text-purple-400 border-purple-500/50 bg-purple-900/40' : 'text-neutral-400 border-white/10 bg-white/5');
+        
+        // 등장 딜레이 (순차적 등장)
+        const delay = idx * 0.1;
+
+        return `
+            <div class="w-32 h-40 ${colorClass} border-2 rounded-xl flex flex-col items-center justify-center p-3 m-2" style="animation: slideUp 0.5s ease-out ${delay}s both;">
+                <span class="text-4xl mb-2 filter drop-shadow-md">${item.rarity >= 5 ? '👑' : (item.rarity === 4 ? '✨' : '📦')}</span>
+                <p class="text-xs font-bold uppercase leading-tight text-center break-words w-full px-1">${item.name}</p>
+                <div class="mt-2 text-[10px] opacity-70 font-mono tracking-widest">${"★".repeat(item.rarity)}</div>
+            </div>
+        `;
+    }).join('');
+
+    content.innerHTML = `
+        <h3 class="text-4xl font-black text-white uppercase italic mb-10 drop-shadow-lg tracking-tighter">Acquired Items</h3>
+        <div class="flex flex-wrap justify-center max-w-4xl gap-2">
+            ${itemsHtml}
+        </div>
+    `;
+
+    resultArea.classList.remove('hidden');
+    // 팝업 애니메이션
+    setTimeout(() => {
+        content.classList.remove('scale-0');
+        content.classList.add('scale-100');
+    }, 50);
+}
+
+// 인벤토리에 아이템 추가
+async function addItemsToInventory(items) {
+    try {
+        const userRef = doc(db, 'artifacts', appId, 'users', state.user.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+            const currentInventory = userSnap.data().inventory || [];
+            const gachaHistory = userSnap.data().gachaHistory || [];
+            
+            const newInventory = [...currentInventory, ...items.map(item => ({
+                ...item,
+                acquiredAt: Date.now(),
+                id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            }))];
+            
+            // 가챠 기록 추가 (최신 5개만 유지)
+            const newRecord = {
+                timestamp: Date.now(),
+                items: items,
+                userName: state.userAccount.ocName
+            };
+            const updatedHistory = [newRecord, ...gachaHistory].slice(0, 5);
+            
+            await setDoc(userRef, { 
+                inventory: newInventory,
+                gachaHistory: updatedHistory
+            }, { merge: true });
+            
+            state.userAccount.inventory = newInventory;
+            state.userAccount.gachaHistory = updatedHistory;
+            
+            showToast(`+${items.length} items to inventory!`);
+            
+            // 가챠 기록을 public 컬렉션에도 저장 (다른 유저들이 볼 수 있도록)
+            await savePublicGachaHistory(newRecord);
+        }
+    } catch(e) {
+        console.error("Failed to add items to inventory:", e);
+    }
+}
+
+// 공개 가챠 기록 저장
+async function savePublicGachaHistory(record) {
+    try {
+        const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'gacha_history');
+        await addDoc(historyRef, {
+            ...record,
+            userId: state.user.uid,
+            loginId: state.userAccount.loginId
+        });
+    } catch(e) {
+        console.error("Failed to save public gacha history:", e);
+    }
+}
+
+// 최근 가챠 기록 로드
+async function loadRecentGachaHistory() {
+    try {
+        const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'gacha_history');
+        const q = query(historyRef, orderBy('timestamp', 'desc'), limit(5));
+        const snapshot = await getDocs(q);
+        
+        const historyEl = document.getElementById('gacha-recent-history');
+        if (!historyEl) return;
+        
+        if (snapshot.empty) {
+            historyEl.innerHTML = '<p class="text-[9px] text-neutral-600 italic">No recent pulls yet.</p>';
+            return;
+        }
+        
+        const historyHtml = snapshot.docs.map(doc => {
+            const data = doc.data();
+            const timeAgo = getTimeAgo(data.timestamp);
+            const topItem = data.items.sort((a,b) => b.rarity - a.rarity)[0];
+            const rarityColor = topItem.rarity >= 5 ? 'text-amber-400' : (topItem.rarity === 4 ? 'text-purple-400' : 'text-neutral-400');
+            
+            return `
+                <div class="flex items-center gap-2 text-[9px] text-neutral-400 py-1 border-b border-white/5">
+                    <span class="font-bold text-white">${data.userName}</span>
+                    <span>pulled</span>
+                    <span class="${rarityColor} font-bold">${topItem.name}</span>
+                    ${data.items.length > 1 ? `<span class="text-neutral-600">+${data.items.length-1}</span>` : ''}
+                    <span class="ml-auto text-neutral-600 font-mono">${timeAgo}</span>
+                </div>
+            `;
+        }).join('');
+        
+        historyEl.innerHTML = historyHtml;
+    } catch(e) {
+        console.error("Failed to load gacha history:", e);
+    }
+}
+
+// 시간 경과 표시 헬퍼
+function getTimeAgo(timestamp) {
+    const now = Date.now();
+    const diff = Math.floor((now - timestamp) / 1000);
+    
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+}
+
+// 인벤토리 열기
+window.openInventory = async () => {
+    const modal = document.getElementById('inventory-modal');
+    const content = document.getElementById('inventory-content');
+    
+    // 인벤토리 로드
+    try {
+        const userRef = doc(db, 'artifacts', appId, 'users', state.user.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+            const inventory = userSnap.data().inventory || [];
+            
+            if (inventory.length === 0) {
+                content.innerHTML = `
+                    <div class="text-center py-20">
+                        <i data-lucide="package-x" class="w-16 h-16 mx-auto text-neutral-600 mb-4"></i>
+                        <p class="text-neutral-500 text-sm">Your inventory is empty.</p>
+                    </div>
+                `;
+            } else {
+                content.innerHTML = `
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        ${inventory.map(item => {
+                            const colorClass = item.rarity >= 5 ? 'border-amber-500 bg-amber-900/20' : 
+                                               (item.rarity === 4 ? 'border-purple-500 bg-purple-900/20' : 'border-white/10 bg-white/5');
+                            return `
+                                <div class="p-4 ${colorClass} border rounded-xl flex flex-col items-center justify-center hover:scale-105 transition-transform">
+                                    <span class="text-4xl mb-2">${item.rarity >= 5 ? '👑' : (item.rarity === 4 ? '✨' : '📦')}</span>
+                                    <p class="text-[10px] font-bold uppercase text-center text-white">${item.name}</p>
+                                    <div class="mt-2 text-[9px] text-amber-500 font-mono">${"★".repeat(item.rarity)}</div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+        }
+    } catch(e) {
+        console.error(e);
+        content.innerHTML = `<p class="text-red-500 text-center">Failed to load inventory.</p>`;
+    }
+    
+    modal.classList.remove('hidden');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+};
+
+// 인벤토리 닫기
+window.closeInventory = () => {
+    document.getElementById('inventory-modal').classList.add('hidden');
+};
+
+// 관리자 설정창 열기
+window.openGachaAdmin = () => {
+    document.getElementById('gacha-admin-modal').classList.remove('hidden');
+};
+
+// 관리자 설정 저장 (DB)
+window.saveGachaConfig = async () => {
+    try {
+        const jsonStr = document.getElementById('gacha-json-input').value;
+        const newPool = JSON.parse(jsonStr);
+        
+        gachaPool = newPool; // 메모리 갱신
+        
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'gachaConfig'), {
+            pool: newPool,
+            updatedAt: serverTimestamp()
+        });
+        
+        alert("Gacha pool updated!");
+        document.getElementById('gacha-admin-modal').classList.add('hidden');
+        renderGacha(); 
+        
+    } catch(e) {
+        alert("Invalid JSON format. Please check syntax.");
+    }
+};
+
+/* -----------------------------------------
+   4. 슬롯머신 (Slot Machine) 시스템
+   ----------------------------------------- */
+const slotSymbols = ['🍒', '🍋', '🍊', '7️⃣', '💎'];
+let isSpinning = false;
+
+window.renderSlots = () => {
+    const contentArea = document.getElementById('content-area');
+    contentArea.innerHTML = `
+        <div class="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden animate-fade-in relative h-full">
+            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
+            <div class="absolute inset-0 bg-gradient-to-br from-green-900/20 via-black to-yellow-900/20 pointer-events-none"></div>
+
+            <div class="p-8 border-b border-white/5 flex justify-between items-center bg-black/40 backdrop-blur-xl z-20">
+                <div>
+                    <h2 class="text-3xl font-black text-green-400 uppercase italic tracking-tighter">Lucky 777</h2>
+                    <p class="text-[10px] text-neutral-500 uppercase tracking-widest mt-1">Slot Machine Protocol</p>
+                </div>
+                <button onclick="openMiniGameHub()" class="px-4 py-2 border border-white/10 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all">EXIT</button>
+            </div>
+
+            <div class="flex-1 flex flex-col items-center justify-center relative overflow-hidden p-10">
+                <!-- 슬롯 머신 -->
+                <div class="relative bg-neutral-900 border-4 border-green-900/50 rounded-3xl p-12 shadow-[0_0_100px_rgba(34,197,94,0.3)] backdrop-blur-md">
+                    <!-- 상단 장식 -->
+                    <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-amber-500 text-black font-black text-xs px-6 py-2 rounded-full shadow-xl">
+                        LUCKY 777
+                    </div>
+                    
+                    <!-- 슬롯 디스플레이 -->
+                    <div class="flex gap-4 mb-8">
+                        <div id="slot-1" class="w-24 h-32 bg-black border-2 border-green-500/50 rounded-xl flex items-center justify-center text-6xl shadow-inner">
+                            🍒
+                        </div>
+                        <div id="slot-2" class="w-24 h-32 bg-black border-2 border-green-500/50 rounded-xl flex items-center justify-center text-6xl shadow-inner">
+                            🍒
+                        </div>
+                        <div id="slot-3" class="w-24 h-32 bg-black border-2 border-green-500/50 rounded-xl flex items-center justify-center text-6xl shadow-inner">
+                            🍒
+                        </div>
+                    </div>
+                    
+                    <!-- 결과 표시 -->
+                    <div id="slot-result" class="h-12 mb-6 flex items-center justify-center">
+                        <p class="text-sm text-neutral-500 font-mono">Ready to spin!</p>
+                    </div>
+                    
+                    <!-- 스핀 버튼 -->
+                    <button onclick="spinSlots()" id="spin-button" class="w-full py-6 bg-gradient-to-b from-green-500 to-green-700 hover:from-green-400 hover:to-green-600 text-white font-black text-xl uppercase rounded-xl shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                        🎰 SPIN (10 Coins)
+                    </button>
+                </div>
+                
+                <!-- 페이테이블 -->
+                <div class="mt-12 bg-black/50 border border-white/5 rounded-xl p-6 backdrop-blur-md max-w-md">
+                    <h4 class="text-xs font-bold text-white uppercase mb-4 tracking-widest border-b border-white/10 pb-2">Paytable</h4>
+                    <ul class="text-[10px] text-neutral-400 space-y-2 font-mono">
+                        <li class="flex justify-between">
+                            <span>💎 💎 💎</span> <span class="text-yellow-500 font-bold">3x (30 Coins)</span>
+                        </li>
+                        <li class="flex justify-between">
+                            <span>7️⃣ 7️⃣ 7️⃣</span> <span class="text-amber-500 font-bold">2x (20 Coins)</span>
+                        </li>
+                        <li class="flex justify-between">
+                            <span>🍊 🍊 🍊 / 🍋 🍋 🍋 / 🍒 🍒 🍒</span> <span class="text-green-500 font-bold">1x (10 Coins)</span>
+                        </li>
+                        <li class="flex justify-between">
+                            <span>Any other</span> <span class="text-red-500">0x (Lose)</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    `;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+};
+
+// 슬롯 스핀 실행
+window.spinSlots = async () => {
+    if (isSpinning) return;
+    
+    // 코인 체크
+    const cost = 10;
+    const currentCoins = state.userAccount.coins || 0;
+    
+    if (currentCoins < cost) {
+        showToast("Not enough coins! Need 10 coins.");
+        return;
+    }
+    
+    // 코인 차감
+    try {
+        await syncUserCoins(state.user.uid, state.userAccount.loginId, currentCoins - cost);
+        showToast("-10 coins");
+    } catch(e) {
+        console.error(e);
+        showToast("Payment failed!");
+        return;
+    }
+    
+    isSpinning = true;
+    const spinButton = document.getElementById('spin-button');
+    const resultDiv = document.getElementById('slot-result');
+    spinButton.disabled = true;
+    resultDiv.innerHTML = '<p class="text-sm text-yellow-500 font-mono animate-pulse">Spinning...</p>';
+    
+    // 슬롯 애니메이션 (순차적으로 멈춤)
+    const slots = [
+        document.getElementById('slot-1'),
+        document.getElementById('slot-2'),
+        document.getElementById('slot-3')
+    ];
+    
+    const results = [];
+    
+    for (let i = 0; i < 3; i++) {
+        // 슬롯 회전 애니메이션
+        let spinCount = 0;
+        const spinInterval = setInterval(() => {
+            slots[i].textContent = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
+            spinCount++;
+            if (spinCount > 20 + i * 10) {
+                clearInterval(spinInterval);
+            }
+        }, 100);
+        
+        // 결과 결정 (대기 후)
+        await new Promise(resolve => setTimeout(resolve, 2000 + i * 500));
+        
+        // 최종 결과
+        const result = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
+        slots[i].textContent = result;
+        results.push(result);
+    }
+    
+    // 결과 판정
+    let winAmount = 0;
+    let message = "";
+    
+    if (results[0] === '💎' && results[1] === '💎' && results[2] === '💎') {
+        winAmount = 30;
+        message = '<p class="text-2xl font-black text-yellow-500 animate-bounce">💎 JACKPOT! +30 COINS! 💎</p>';
+    } else if (results[0] === '7️⃣' && results[1] === '7️⃣' && results[2] === '7️⃣') {
+        winAmount = 20;
+        message = '<p class="text-xl font-black text-amber-500">🎉 LUCKY 777! +20 COINS! 🎉</p>';
+    } else if (results[0] === results[1] && results[1] === results[2]) {
+        winAmount = 10;
+        message = '<p class="text-lg font-bold text-green-500">✨ MATCH! +10 COINS! ✨</p>';
+    } else {
+        message = '<p class="text-sm text-red-500 font-mono">😢 No match... Try again!</p>';
+    }
+    
+    // 결과 표시
+    resultDiv.innerHTML = message;
+    
+    // 상금 지급
+    if (winAmount > 0) {
+        try {
+            const newTotal = state.userAccount.coins + winAmount;
+            await syncUserCoins(state.user.uid, state.userAccount.loginId, newTotal);
+            showToast(`+${winAmount} coins!`);
+        } catch(e) {
+            console.error(e);
+        }
+    }
+    
+    isSpinning = false;
+    spinButton.disabled = false;
+};
+
+/* -----------------------------------------
+   5. Story Timeline (기존 코드)
+   ----------------------------------------- */
 window.renderStoryTimeline = () => {
     const chapters = state.storyData?.chapters || [];
     const isAdmin = state.isAdmin;
@@ -4378,9 +6333,27 @@ window.renderMembers = (filterCode = 'ALL') => {
                                     </h3>
                                     
                                     <div class="flex justify-between items-end mt-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                                        <div class="flex flex-col">
+                                        <div class="flex flex-col flex-1">
                                             <p class="text-[8px] text-neutral-400 font-bold uppercase tracking-widest">Code Name</p>
                                             <p class="text-[9px] font-mono text-neutral-300 truncate tracking-tight">ID: ${m.loginId}</p>
+                                            
+                                            <!-- HP/MP 바 추가 -->
+                                            <div class="mt-2 space-y-1">
+                                                <div class="flex items-center gap-1">
+                                                    <span class="text-red-500 text-[8px]">❤</span>
+                                                    <div class="flex-1 h-1 bg-neutral-800 rounded-full overflow-hidden">
+                                                        <div class="h-full bg-red-500" style="width: ${((m.currentHP || m.stat_hp || 100) / (m.stat_hp || 100)) * 100}%"></div>
+                                                    </div>
+                                                    <span class="text-[8px] text-neutral-500 font-mono">${m.currentHP || m.stat_hp || 100}/${m.stat_hp || 100}</span>
+                                                </div>
+                                                <div class="flex items-center gap-1">
+                                                    <span class="text-blue-500 text-[8px]">💧</span>
+                                                    <div class="flex-1 h-1 bg-neutral-800 rounded-full overflow-hidden">
+                                                        <div class="h-full bg-blue-500" style="width: ${((m.currentMP || m.stat_mp || 100) / (m.stat_mp || 100)) * 100}%"></div>
+                                                    </div>
+                                                    <span class="text-[8px] text-neutral-500 font-mono">${m.currentMP || m.stat_mp || 100}/${m.stat_mp || 100}</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -4478,6 +6451,7 @@ window.openRaidBoard = function() {
     const currentUser = state.user;
     const userId = currentUser ? currentUser.uid : 'anonymous';
     const userAccount = state.userAccount || {};
+    const loginId = userAccount.loginId || userId; // loginId 추가
     
     // 기본 정보 (이름, 이미지)
     const ocName = encodeURIComponent(userAccount.ocName || 'Unknown');
@@ -4499,14 +6473,19 @@ window.openRaidBoard = function() {
     }
     
     
+    // 어드민 권한 확인
+    const isAdmin = state.isAdmin || false;
+    
     console.log("🎮 레이드 보드 열기:", {
         userId,
+        loginId,
         ocName: decodeURIComponent(ocName),
-        skills: rawSkills
+        skills: rawSkills,
+        isAdmin: isAdmin
     });
     
-    // game_board.html에 유저 정보 전달 (맨 뒤에 &skills=... 추가됨)
-    iframe.src = `game_board.html?userId=${userId}&fromHomepage=true&userName=${ocName}&userImage=${ocImage}&statHp=${statHp}&statMp=${statMp}&statAtk=${encodeURIComponent(statAtk)}&statDef=${encodeURIComponent(statDef)}&statMove=${statMove}&skills=${skillParam}`;
+    // game_board.html에 유저 정보 전달 (loginId 추가)
+    iframe.src = `game_board.html?userId=${userId}&loginId=${loginId}&fromHomepage=true&userName=${ocName}&userImage=${ocImage}&statHp=${statHp}&statMp=${statMp}&statAtk=${encodeURIComponent(statAtk)}&statDef=${encodeURIComponent(statDef)}&statMove=${statMove}&skills=${skillParam}&isAdmin=${isAdmin}`;
     
     modal.classList.remove('hidden');
 }
@@ -5096,6 +7075,835 @@ window.importSkillsFromFile = function(event) {
     
     reader.readAsText(file);
 };
+
+/* ============================================
+   추가 기능: 관리자 인벤토리 관리 시스템
+   ============================================ */
+
+let currentManagingUserId = null;
+
+// 관리자 인벤토리 관리 모달 열기
+window.openAdminInventoryManager = async (loginId) => {
+    const user = state.accounts.find(a => a.loginId === loginId);
+    if (!user || !user.uid) {
+        showToast("User not found!");
+        return;
+    }
+    
+    currentManagingUserId = user.uid;
+    const modal = document.getElementById('admin-inventory-modal');
+    const content = document.getElementById('admin-inventory-content');
+    
+    modal.classList.remove('hidden');
+    content.innerHTML = '<p class="text-neutral-500 text-sm text-center py-10">Loading...</p>';
+    
+    try {
+        // 유저 인벤토리 로드
+        const userRef = doc(db, 'artifacts', appId, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        const inventory = userSnap.exists() ? (userSnap.data().inventory || []) : [];
+        
+        // 아이템 마스터 목록 로드 (올바른 경로: 5개 세그먼트)
+        const itemMasterRef = collection(db, 'artifacts', appId, 'public', 'data', 'item_master');
+        const itemMasterSnap = await getDocs(itemMasterRef);
+        const itemMasterList = itemMasterSnap.docs.map(doc => ({id: doc.id, ...doc.data()}));
+        
+        content.innerHTML = `
+            <div class="flex justify-between items-center mb-4">
+                <h4 class="text-sm font-bold text-green-400">Current Items (${inventory.length})</h4>
+                <button onclick="showAddItemToUser()" class="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700">
+                    + Add Item
+                </button>
+            </div>
+            
+            <div id="user-inventory-list" class="grid grid-cols-4 gap-3 mb-6 max-h-64 overflow-y-auto custom-scrollbar">
+                ${inventory.length === 0 ? 
+                    '<p class="col-span-4 text-neutral-600 text-xs text-center py-10">Empty inventory</p>' :
+                    inventory.map((item, idx) => {
+                        const rarityColor = item.rarity >= 5 ? 'border-amber-500/50 bg-amber-900/20' : 
+                                           (item.rarity === 4 ? 'border-purple-500/50 bg-purple-900/20' : 'border-white/10 bg-white/5');
+                        return `
+                            <div class="p-3 ${rarityColor} border rounded-xl relative group">
+                                <button onclick="removeItemFromUser('${item.id}')" 
+                                        class="absolute top-1 right-1 w-5 h-5 bg-red-600/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <i data-lucide="x" class="w-3 h-3 text-white"></i>
+                                </button>
+                                <div class="text-2xl text-center mb-1">${item.icon || '📦'}</div>
+                                <p class="text-[10px] text-white text-center font-bold truncate">${item.name}</p>
+                                <p class="text-[8px] text-neutral-500 text-center">${"★".repeat(item.rarity)}</p>
+                            </div>
+                        `;
+                    }).join('')
+                }
+            </div>
+            
+            <div id="add-item-section" class="hidden bg-black/50 border border-green-500/30 rounded-xl p-4">
+                <h5 class="text-xs font-bold text-green-400 mb-3">Select Item to Add</h5>
+                <div class="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar">
+                    ${itemMasterList.map(item => `
+                        <button onclick="addItemToUser('${item.id}')" 
+                                class="p-2 bg-neutral-800 hover:bg-green-600 border border-white/10 hover:border-green-500 rounded-lg transition-all text-left">
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg">${item.icon || '📦'}</span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-[10px] text-white font-bold truncate">${item.name}</p>
+                                    <p class="text-[8px] text-neutral-500">${item.type}</p>
+                                </div>
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+                <button onclick="hideAddItemToUser()" class="mt-3 w-full py-2 bg-neutral-700 text-neutral-300 text-xs font-bold rounded-lg">
+                    Cancel
+                </button>
+            </div>
+        `;
+        
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch(e) {
+        console.error("Failed to load inventory:", e);
+        content.innerHTML = '<p class="text-red-500 text-sm text-center py-10">Error loading inventory</p>';
+    }
+};
+
+window.showAddItemToUser = () => {
+    document.getElementById('add-item-section').classList.remove('hidden');
+};
+
+window.hideAddItemToUser = () => {
+    document.getElementById('add-item-section').classList.add('hidden');
+};
+
+window.addItemToUser = async (itemMasterId) => {
+    if (!currentManagingUserId) return;
+    
+    try {
+        const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'item_master', itemMasterId);
+        const itemSnap = await getDoc(itemRef);
+        
+        if (!itemSnap.exists()) {
+            showToast("Item not found!");
+            return;
+        }
+        
+        const itemData = itemSnap.data();
+        const newItem = {
+            ...itemData,
+            id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            acquiredAt: Date.now(),
+            addedByAdmin: true
+        };
+        
+        // users 컬렉션에 저장
+        const userRef = doc(db, 'artifacts', appId, 'users', currentManagingUserId);
+        const userSnap = await getDoc(userRef);
+        const currentInventory = userSnap.exists() ? (userSnap.data().inventory || []) : [];
+        const newInventory = [...currentInventory, newItem];
+        
+        await setDoc(userRef, {
+            inventory: newInventory
+        }, { merge: true });
+        
+        // accounts 컬렉션에도 동기화
+        const user = state.accounts.find(a => a.uid === currentManagingUserId);
+        if (user && user.loginId) {
+            const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', user.loginId);
+            await setDoc(accountRef, {
+                inventory: newInventory
+            }, { merge: true });
+            
+            // 로컬 state 업데이트
+            const accountIdx = state.accounts.findIndex(a => a.uid === currentManagingUserId);
+            if (accountIdx !== -1) {
+                state.accounts[accountIdx].inventory = newInventory;
+                
+                // 현재 로그인한 유저가 수정된 경우
+                if (state.userAccount && state.userAccount.uid === currentManagingUserId) {
+                    state.userAccount.inventory = newInventory;
+                }
+            }
+        }
+        
+        showToast("Item added successfully!");
+        
+        if (user) {
+            openAdminInventoryManager(user.loginId);
+        }
+    } catch(e) {
+        console.error("Failed to add item:", e);
+        showToast("Error adding item!");
+    }
+};
+
+window.removeItemFromUser = async (itemId) => {
+    if (!currentManagingUserId) return;
+    if (!confirm("Are you sure you want to remove this item?")) return;
+    
+    try {
+        // users 컬렉션에서 삭제
+        const userRef = doc(db, 'artifacts', appId, 'users', currentManagingUserId);
+        const userSnap = await getDoc(userRef);
+        
+        if (!userSnap.exists()) return;
+        
+        const currentInventory = userSnap.data().inventory || [];
+        const newInventory = currentInventory.filter(item => item.id !== itemId);
+        
+        await setDoc(userRef, {
+            inventory: newInventory
+        }, { merge: true });
+        
+        // accounts 컬렉션에도 동기화
+        const user = state.accounts.find(a => a.uid === currentManagingUserId);
+        if (user && user.loginId) {
+            const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', user.loginId);
+            await setDoc(accountRef, {
+                inventory: newInventory
+            }, { merge: true });
+            
+            // 로컬 state 업데이트
+            const accountIdx = state.accounts.findIndex(a => a.uid === currentManagingUserId);
+            if (accountIdx !== -1) {
+                state.accounts[accountIdx].inventory = newInventory;
+                
+                // 현재 로그인한 유저가 수정된 경우
+                if (state.userAccount && state.userAccount.uid === currentManagingUserId) {
+                    state.userAccount.inventory = newInventory;
+                }
+            }
+        }
+        
+        showToast("Item removed!");
+        
+        if (user) {
+            openAdminInventoryManager(user.loginId);
+        }
+    } catch(e) {
+        console.error("Failed to remove item:", e);
+        showToast("Error removing item!");
+    }
+};
+
+window.closeAdminInventoryModal = () => {
+    document.getElementById('admin-inventory-modal').classList.add('hidden');
+    currentManagingUserId = null;
+};
+
+/* ============================================
+   상점 시스템 (최적화: Firebase 읽기 캐싱 + NPC 대사 확장 + NPC 터치 반응)
+   ============================================ */
+
+/* ── 캐시 변수 (앱 세션 중 1회만 로딩) ── */
+let _shopCache = null;          // { items: [], npcConfig: {}, loadedAt: 0 }
+let shopAccountUnsub = null;
+
+const SHOP_CACHE_TTL = 5 * 60 * 1000; // 5분 (NPC 설정 저장 시 자동 무효화)
+
+async function loadShopData(forceReload = false) {
+    const now = Date.now();
+    if (!forceReload && _shopCache && (now - _shopCache.loadedAt) < SHOP_CACHE_TTL) {
+        console.log("🛒 상점 캐시 사용 (Firebase 읽기 절약)");
+        return _shopCache;
+    }
+
+    console.log("🛒 상점 Firebase 로딩 (최초 or 강제 새로고침)");
+
+    // NPC 설정 로딩
+    let npcConfig = {
+        name: "Sonetto",
+        image: "https://i.pinimg.com/564x/cd/6d/46/cd6d460877960309a473467406a66596.jpg",
+        defaultText: "Timekeeper, supplies have arrived. Please take a look.",
+        greetTexts: [
+            "Ah, welcome back. Looking for something special?",
+            "I was expecting you. Come, see what I have.",
+            "The finest selection awaits, as always."
+        ],
+        selectTexts: [
+            "A fine choice, I must say.",
+            "Oh? You have refined taste.",
+            "That item has caught many eyes.",
+            "A necessary supply for what lies ahead."
+        ],
+        buyTexts: [
+            "A pleasure doing business with you.",
+            "May it serve you well.",
+            "Excellent. That item will not disappoint.",
+            "Transaction complete. A wise investment."
+        ],
+        touchTexts: [
+            "..Is something the matter?",
+            "Please, browse at your leisure.",
+            "I assure you, every item is authentic.",
+            "Take your time. No rush here."
+        ]
+    };
+
+    try {
+        const npcSnap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'npcConfig_shop'));
+        if (npcSnap.exists()) {
+            npcConfig = { ...npcConfig, ...npcSnap.data() };
+        }
+    } catch(e) { console.log("NPC Config error, using default."); }
+
+    // 아이템 목록 로딩
+    const itemsRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'item_master');
+    const snapshot = await getDocs(itemsRef);
+    const items = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(item => item.price > 0 && item.availability?.inShop);
+
+    _shopCache = { items, npcConfig, loadedAt: Date.now() };
+    return _shopCache;
+}
+
+window.renderShop = async () => {
+    const contentArea = document.getElementById('content-area');
+    const isAdmin = state.isAdmin;
+
+    // 실시간 코인 리스너 (상점 진입 시 1회만 설정)
+    if (shopAccountUnsub) shopAccountUnsub();
+    if (state.userAccount?.loginId) {
+        const myAccountRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'accounts', state.userAccount.loginId);
+        shopAccountUnsub = onSnapshot(myAccountRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                state.userAccount.gold = data.coins || 0;
+                state.userAccount.inventory = data.inventory || [];
+                const coinDisplay = document.getElementById('shop-coins-display');
+                if (coinDisplay) coinDisplay.innerText = state.userAccount.gold.toLocaleString();
+            }
+        });
+    }
+
+    // 로딩 화면
+    contentArea.innerHTML = `
+        <div class="flex-1 flex items-center justify-center bg-[#080808]">
+            <div class="flex flex-col items-center gap-4">
+                <div class="w-12 h-[1px] bg-amber-600/50"></div>
+                <div class="text-xs font-serif text-amber-600 tracking-[0.4em] animate-pulse uppercase">Accessing Boutique</div>
+            </div>
+        </div>`;
+
+    try {
+        const { items: shopItems, npcConfig } = await loadShopData();
+
+        // 입장 대사 (greetTexts에서 랜덤)
+        const greetList = npcConfig.greetTexts || [npcConfig.defaultText];
+        const greetText = greetList[Math.floor(Math.random() * greetList.length)];
+
+        contentArea.innerHTML = `
+        <style>
+            @keyframes npcShake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-4px)} 40%{transform:translateX(4px)} 60%{transform:translateX(-3px)} 80%{transform:translateX(3px)} }
+            @keyframes npcGlow { 0%{box-shadow:0 0 0 0 rgba(217,119,6,0)} 50%{box-shadow:0 0 30px 5px rgba(217,119,6,0.3)} 100%{box-shadow:0 0 0 0 rgba(217,119,6,0)} }
+            .npc-portrait-area { cursor: pointer; transition: filter 0.3s; }
+            .npc-portrait-area:hover img { filter: brightness(1.1); }
+            .npc-portrait-area.npc-touched { animation: npcGlow 0.6s ease-out; }
+            #npc-text { transition: opacity 0.3s ease; }
+        </style>
+
+        <div class="flex-1 flex bg-[#050505] overflow-hidden animate-fade-in relative h-full w-full select-none font-serif">
+            
+            <!-- NPC 패널 (클릭 가능) -->
+            <div class="w-[400px] relative h-full border-r border-white/5 overflow-hidden z-20 shadow-[20px_0_50px_rgba(0,0,0,0.8)]">
+                <div class="absolute inset-0 bg-[#0a0a0a]"></div>
+
+                <!-- NPC 이미지 (터치 반응 영역) -->
+                <div id="npc-portrait-area" class="npc-portrait-area absolute inset-0 z-0" onclick="handleNpcTouch()">
+                    <img id="npc-portrait" src="${npcConfig.image}" class="w-full h-full object-cover object-top opacity-90 transition-all duration-1000">
+                    <div class="absolute bottom-0 left-0 w-full h-[40%] bg-gradient-to-t from-[#050505] via-[#050505]/90 to-transparent"></div>
+                    <!-- 터치 힌트 -->
+                    <div class="absolute top-4 right-4 opacity-0 hover:opacity-100 transition-opacity">
+                        <span class="text-[8px] text-amber-500/60 font-mono tracking-widest uppercase bg-black/40 px-2 py-1 rounded">tap me</span>
+                    </div>
+                </div>
+
+                ${isAdmin ? `
+                <button onclick="openNpcEditor()" class="absolute top-6 left-6 z-50 p-2 text-white/20 hover:text-amber-500 bg-black/20 hover:bg-black/50 rounded-full transition-all backdrop-blur-sm">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                </button>` : ''}
+
+                <div class="absolute bottom-0 left-0 w-full p-8 z-20 flex flex-col items-start pointer-events-none">
+                    <div class="flex items-center gap-3 mb-2 opacity-70">
+                        <div class="w-1.5 h-1.5 rotate-45 border border-amber-500/50"></div>
+                        <div class="w-8 h-[1px] bg-amber-500/50"></div>
+                        <span class="text-[9px] text-amber-500/80 tracking-[0.3em] uppercase">Reception</span>
+                    </div>
+
+                    <h2 class="text-3xl text-white italic font-light tracking-wide mb-6 drop-shadow-lg">
+                        ${npcConfig.name}
+                    </h2>
+
+                    <div class="relative w-full pointer-events-auto">
+                        <div class="w-full min-h-[120px] bg-gradient-to-br from-white/10 to-transparent border-l-[2px] border-amber-600/60 backdrop-blur-sm p-5 relative">
+                            <p id="npc-text" class="text-[#e5e5e5] text-xs leading-6 tracking-wide font-light">
+                                "${greetText}"
+                            </p>
+                            <i data-lucide="quote" class="absolute bottom-3 right-3 w-4 h-4 text-amber-600/30 rotate-180"></i>
+                        </div>
+                    </div>
+
+                    <button onclick="if(shopAccountUnsub) shopAccountUnsub(); renderOperation();"
+                        class="mt-8 flex items-center gap-3 text-[10px] text-neutral-500 hover:text-amber-500 transition-colors tracking-[0.2em] uppercase group pointer-events-auto">
+                        <span class="w-6 h-[1px] bg-neutral-700 group-hover:bg-amber-500 transition-colors"></span>
+                        Leave Boutique
+                    </button>
+                </div>
+            </div>
+
+            <!-- 아이템 패널 -->
+            <div class="flex-1 flex flex-col relative z-10">
+                <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 pointer-events-none"></div>
+
+                <div class="px-10 pt-10 pb-4 flex justify-between items-end border-b border-white/5 mx-6 bg-gradient-to-b from-[#050505] to-transparent z-20">
+                    <div>
+                        <h2 class="text-4xl font-light text-white tracking-widest uppercase italic font-serif">Artifacts</h2>
+                        <p class="text-[9px] text-amber-600/80 mt-1 tracking-[0.4em] uppercase">Exchange & Supply</p>
+                    </div>
+                    <div class="flex flex-col items-end">
+                        <span class="text-[9px] text-neutral-600 uppercase tracking-widest mb-1">Current Assets</span>
+                        <div class="flex items-center gap-2 border border-white/10 bg-white/5 px-3 py-1.5 rounded-sm">
+                            <span id="shop-coins-display" class="text-xl font-medium text-amber-500 font-serif">
+                                ${state.userAccount.gold ? state.userAccount.gold.toLocaleString() : 0}
+                            </span>
+                            <span class="text-[9px] text-neutral-400 uppercase tracking-wider">Coins</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto custom-scrollbar px-10 py-8">
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-7xl mx-auto pb-20">
+                        ${shopItems.length === 0 ?
+                            '<p class="col-span-full text-center text-neutral-600 py-20 font-serif italic text-sm">Inventory Empty.</p>' :
+                            shopItems.map(item => {
+                                const isHighRank = item.rarity >= 5;
+                                const borderColor = isHighRank ? 'border-amber-600/40' : 'border-white/10';
+                                const hoverBorder = isHighRank ? 'group-hover:border-amber-500' : 'group-hover:border-white/40';
+                                const glow = isHighRank ? 'shadow-[0_0_15px_rgba(217,119,6,0.15)]' : '';
+                                return `
+                                <div onclick="handleShopItemClick('${item.id}', ${item.price}, '${item.name.replace(/'/g,"\\\'")}')"
+                                     class="group relative h-[220px] bg-[#0f0f0f] border ${borderColor} ${hoverBorder} ${glow} cursor-pointer transition-all duration-300 overflow-hidden hover:-translate-y-1">
+                                    <div class="absolute -right-2 -bottom-2 text-[5rem] opacity-5 group-hover:opacity-10 transition-opacity duration-500 select-none grayscale group-hover:grayscale-0">
+                                        ${item.icon || '✦'}
+                                    </div>
+                                    <div class="absolute inset-0 p-5 flex flex-col justify-between z-10">
+                                        <div class="flex justify-between items-start">
+                                            <span class="text-[8px] font-bold px-1.5 py-0.5 bg-black/50 border border-white/10 text-neutral-400 uppercase tracking-widest">
+                                                Rank ${item.rarity || 1}
+                                            </span>
+                                            <div class="flex items-center gap-1 text-amber-500">
+                                                <i data-lucide="coins" class="w-3 h-3"></i>
+                                                <span class="text-xs font-bold font-mono">${item.price.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                        <div class="relative">
+                                            <div class="w-6 h-[1px] bg-white/20 mb-2 group-hover:w-full group-hover:bg-amber-600/50 transition-all duration-500"></div>
+                                            <h3 class="text-sm font-bold text-white uppercase tracking-wide group-hover:text-amber-500 transition-colors mb-1 truncate">
+                                                ${item.name}
+                                            </h3>
+                                            <p class="text-[10px] text-neutral-500 font-light leading-snug line-clamp-2 group-hover:text-neutral-300">
+                                                ${item.description || 'No description.'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="absolute inset-0 bg-gradient-to-t from-amber-900/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+                                </div>`;
+                            }).join('')
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- NPC 에디터 모달 (관리자용) -->
+            <div id="npc-editor-modal" class="hidden fixed inset-0 z-[300] bg-black/90 flex items-center justify-center backdrop-blur-md p-6">
+                <div class="w-full max-w-lg bg-[#0f0f0f] border border-amber-600/30 p-8 shadow-2xl relative overflow-y-auto max-h-[90vh]">
+                    <h3 class="text-2xl font-serif text-white italic mb-2 text-center">Configure Persona</h3>
+                    <p class="text-[9px] text-amber-500/60 text-center tracking-widest uppercase mb-8">NPC 설정 & 대사 편집</p>
+                    
+                    <div class="space-y-5">
+                        <!-- 기본 설정 -->
+                        <div>
+                            <label class="text-[9px] text-neutral-500 uppercase tracking-widest font-bold block mb-1">NPC 이름</label>
+                            <input id="npc-edit-name" type="text" value="${npcConfig.name}" class="w-full bg-black border border-white/20 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:border-amber-500">
+                        </div>
+                        <div>
+                            <label class="text-[9px] text-neutral-500 uppercase tracking-widest font-bold block mb-1">NPC 이미지 URL</label>
+                            <input id="npc-edit-image" type="text" value="${npcConfig.image}" class="w-full bg-black border border-white/20 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:border-amber-500">
+                        </div>
+
+                        <!-- 입장 대사 -->
+                        <div>
+                            <label class="text-[9px] text-amber-500/80 uppercase tracking-widest font-bold block mb-1">
+                                🚪 입장 대사 <span class="text-neutral-600">(줄바꿈으로 구분, 랜덤 출력)</span>
+                            </label>
+                            <textarea id="npc-edit-greet" class="w-full bg-black border border-white/20 rounded-lg px-4 py-2.5 text-white text-xs h-20 outline-none focus:border-amber-500 leading-6">${(npcConfig.greetTexts || [npcConfig.defaultText]).join('\n')}</textarea>
+                        </div>
+
+                        <!-- 아이템 선택 대사 -->
+                        <div>
+                            <label class="text-[9px] text-blue-400/80 uppercase tracking-widest font-bold block mb-1">
+                                👆 아이템 선택 시 대사 <span class="text-neutral-600">(줄바꿈으로 구분, 랜덤 출력)</span>
+                            </label>
+                            <textarea id="npc-edit-select" class="w-full bg-black border border-white/20 rounded-lg px-4 py-2.5 text-white text-xs h-20 outline-none focus:border-amber-500 leading-6">${(npcConfig.selectTexts || ["A fine choice, I must say.","Oh? You have refined taste.","That item has caught many eyes.","A necessary supply for what lies ahead."]).join('\n')}</textarea>
+                        </div>
+
+                        <!-- 구매 완료 대사 -->
+                        <div>
+                            <label class="text-[9px] text-green-400/80 uppercase tracking-widest font-bold block mb-1">
+                                💰 구매 완료 대사 <span class="text-neutral-600">(줄바꿈으로 구분, 랜덤 출력)</span>
+                            </label>
+                            <textarea id="npc-edit-buy" class="w-full bg-black border border-white/20 rounded-lg px-4 py-2.5 text-white text-xs h-20 outline-none focus:border-amber-500 leading-6">${(npcConfig.buyTexts || ["A pleasure doing business with you.","May it serve you well.","Excellent. That item will not disappoint.","Transaction complete. A wise investment."]).join('\n')}</textarea>
+                        </div>
+
+                        <!-- NPC 터치 대사 -->
+                        <div>
+                            <label class="text-[9px] text-purple-400/80 uppercase tracking-widest font-bold block mb-1">
+                                ✨ NPC 터치 시 대사 <span class="text-neutral-600">(줄바꿈으로 구분, 랜덤 출력)</span>
+                            </label>
+                            <textarea id="npc-edit-touch" class="w-full bg-black border border-white/20 rounded-lg px-4 py-2.5 text-white text-xs h-20 outline-none focus:border-amber-500 leading-6">${(npcConfig.touchTexts || ["..Is something the matter?","Please, browse at your leisure.","I assure you, every item is authentic.","Take your time. No rush here."]).join('\n')}</textarea>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 mt-8">
+                        <button onclick="document.getElementById('npc-editor-modal').classList.add('hidden')" 
+                                class="flex-1 py-3 text-white bg-neutral-800 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-neutral-700 transition-colors">
+                            Cancel
+                        </button>
+                        <button onclick="saveNpcConfig()" 
+                                class="flex-1 py-3 text-black bg-amber-600 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-amber-500 transition-colors">
+                            Save Config
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        if (window.lucide) lucide.createIcons();
+
+    } catch (e) {
+        console.error("Shop Error:", e);
+        contentArea.innerHTML = `<div class="flex h-full items-center justify-center text-red-500 font-serif">System Malfunction.</div>`;
+    }
+};
+
+/* --- NPC 대사 업데이트 (페이드 효과) --- */
+window.updateNPCText = (text) => {
+    const el = document.getElementById('npc-text');
+    if (!el) return;
+    el.style.opacity = '0';
+    setTimeout(() => {
+        el.innerText = `"${text}"`;
+        el.style.opacity = '1';
+    }, 300);
+};
+
+/* --- NPC 터치 반응 --- */
+window.handleNpcTouch = () => {
+    const cache = _shopCache;
+    if (!cache) return;
+    const touchList = cache.npcConfig.touchTexts;
+    if (!touchList || touchList.length === 0) return;
+
+    const text = touchList[Math.floor(Math.random() * touchList.length)];
+    window.updateNPCText(text);
+
+    // 이미지 영역 흔들기 효과
+    const area = document.getElementById('npc-portrait-area');
+    if (area) {
+        area.classList.remove('npc-touched');
+        void area.offsetWidth; // reflow
+        area.classList.add('npc-touched');
+        // 이미지 살짝 반응 (스케일)
+        const img = document.getElementById('npc-portrait');
+        if (img) {
+            img.style.transform = 'scale(1.03)';
+            setTimeout(() => { img.style.transform = 'scale(1)'; }, 600);
+        }
+    }
+};
+
+/* --- 아이템 클릭 핸들러 (선택 대사) --- */
+window.handleShopItemClick = (id, price, name) => {
+    const cache = _shopCache;
+    if (cache && cache.npcConfig.selectTexts?.length > 0) {
+        const list = cache.npcConfig.selectTexts;
+        window.updateNPCText(list[Math.floor(Math.random() * list.length)]);
+    } else {
+        window.updateNPCText(`"${name}"... A fascinating choice.`);
+    }
+    if (window.buyShopItem) {
+        window.buyShopItem(id, price, name);
+    } else {
+        console.error("buyShopItem function missing!");
+    }
+};
+
+/* --- 관리자 설정 저장 (캐시 무효화 포함) --- */
+window.openNpcEditor = () => document.getElementById('npc-editor-modal').classList.remove('hidden');
+
+window.saveNpcConfig = async () => {
+    const parseLines = (id) => document.getElementById(id).value
+        .split('\n').map(s => s.trim()).filter(Boolean);
+
+    const config = {
+        name: document.getElementById('npc-edit-name').value.trim(),
+        image: document.getElementById('npc-edit-image').value.trim(),
+        defaultText: parseLines('npc-edit-greet')[0] || "Welcome.",
+        greetTexts: parseLines('npc-edit-greet'),
+        selectTexts: parseLines('npc-edit-select'),
+        buyTexts: parseLines('npc-edit-buy'),
+        touchTexts: parseLines('npc-edit-touch')
+    };
+
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'npcConfig_shop'), config);
+        _shopCache = null; // 캐시 무효화 → 다음 진입 시 재로딩
+        document.getElementById('npc-editor-modal').classList.add('hidden');
+        renderShop(); // 즉시 리렌더링
+    } catch(e) { alert("Error saving configuration: " + e.message); }
+};
+
+/* --- 구매 함수 (독립형 안전 로직) --- */
+window.buyShopItem = async (itemId, price, itemName) => {
+    // 1. 현재 코인 확인 (state에서 가져옴)
+    const currentGold = state.userAccount.gold || 0;
+
+    if (currentGold < price) {
+        window.updateNPCText("Insufficient funds. I cannot offer charity.");
+        return;
+    }
+
+    if (!confirm(`Purchase [${itemName}] for ${price} coins?`)) return;
+
+    try {
+        const myId = state.userAccount.loginId;
+        const myUid = state.userAccount.uid; // uid도 필요할 수 있음
+
+        // 2. DB 참조 (accounts 및 users 컬렉션 모두 업데이트)
+        // accounts 컬렉션 (메인 데이터)
+        const accountRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'accounts', myId);
+        
+        // users 컬렉션 (보조 데이터 - 게임 등에서 사용)
+        // uid가 있으면 users 컬렉션도 업데이트 시도
+        let userRef = null;
+        if (myUid) {
+            userRef = doc(window.db, 'artifacts', window.appId, 'users', myUid);
+        }
+
+        // 3. 인벤토리 아이템 생성
+        const currentInventory = state.userAccount.inventory || [];
+        const newItem = {
+            id: itemId,
+            name: itemName,
+            uid: Date.now().toString() + Math.random().toString(36).substr(2,5), // 고유 ID 생성
+            purchasedAt: Date.now()
+        };
+        const newInventory = [...currentInventory, newItem];
+        const newGold = currentGold - price;
+
+        // 4. DB 업데이트 실행
+        const updates = {
+            coins: newGold, // coins 필드 업데이트
+            gold: newGold,  // gold 필드도 같이 업데이트 (호환성 위함)
+            inventory: newInventory
+        };
+
+        await updateDoc(accountRef, updates);
+        
+        if (userRef) {
+            // users 컬렉션이 없으면 생성(setDoc merge), 있으면 업데이트
+            await setDoc(userRef, updates, { merge: true });
+        }
+
+        // 5. 로컬 상태 즉시 반영 (리스너가 늦게 돌 경우를 대비)
+        state.userAccount.gold = newGold;
+        state.userAccount.inventory = newInventory;
+        
+        // 상단 코인 UI 강제 갱신
+        const coinDisplay = document.getElementById('shop-coins-display');
+        if (coinDisplay) coinDisplay.innerText = newGold.toLocaleString();
+
+        // 6. NPC 구매 완료 대사 (캐시에서 buyTexts 참조)
+        if (window.updateNPCText) {
+            const buyList = _shopCache?.npcConfig?.buyTexts;
+            if (buyList && buyList.length > 0) {
+                window.updateNPCText(buyList[Math.floor(Math.random() * buyList.length)]);
+            } else {
+                window.updateNPCText(`Transaction complete. "${itemName}" is now yours.`);
+            }
+        }
+        
+    } catch (e) {
+        console.error("Purchase Failed:", e);
+        if (window.updateNPCText) {
+            window.updateNPCText("Transaction error. System malfunctioning.");
+        }
+        alert("구매 중 오류가 발생했습니다: " + e.message);
+    }
+};
+/* ============================================
+   선물 기능
+   ============================================ */
+
+let giftTargetId = null;
+let selectedGiftItemId = null;
+
+window.openGiftModal = async (targetLoginId) => {
+    giftTargetId = targetLoginId;
+    const myInventory = state.userAccount.inventory || [];
+    
+    if (myInventory.length === 0) {
+        showToast("You have no items to gift!");
+        return;
+    }
+    
+    const modal = document.getElementById('gift-modal');
+    const content = document.getElementById('gift-items-list');
+    
+    if (!modal || !content) {
+        console.error("Gift modal not found");
+        return;
+    }
+    
+    content.innerHTML = myInventory.map((item, index) => {
+        const rarityColor = item.rarity >= 5 ? 'border-amber-500/50 bg-amber-900/20' : 
+                           (item.rarity === 4 ? 'border-purple-500/50 bg-purple-900/20' : 'border-white/10 bg-white/5');
+        const isSelected = selectedGiftItemId === item.id;
+        return `
+            <div class="gift-item p-4 ${rarityColor} ${isSelected ? 'ring-2 ring-amber-500' : ''} border-2 rounded-xl hover:scale-105 transition-all cursor-pointer"
+                 data-item-id="${item.id}"
+                 data-item-index="${index}">
+                <div class="text-3xl text-center mb-2">${item.icon || '📦'}</div>
+                <p class="text-xs text-white text-center font-bold truncate">${item.name}</p>
+                <p class="text-[8px] text-neutral-500 text-center mt-1">${"★".repeat(item.rarity)}</p>
+            </div>
+        `;
+    }).join('');
+    
+    // 이벤트 리스너 추가
+    content.querySelectorAll('.gift-item').forEach((itemEl, index) => {
+        itemEl.addEventListener('click', () => {
+            const itemId = myInventory[index].id;
+            console.log('아이템 클릭:', itemId, myInventory[index]);
+            selectGiftItem(itemId);
+        });
+    });
+    
+    modal.classList.remove('hidden');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+};
+
+window.selectGiftItem = (itemId) => {
+    selectedGiftItemId = itemId;
+    
+    // 모든 아이템에서 선택 표시 제거
+    const allItems = document.querySelectorAll('.gift-item');
+    allItems.forEach(item => {
+        item.classList.remove('ring-2', 'ring-amber-500');
+    });
+    
+    // 선택된 아이템에 표시 추가
+    const selectedItem = document.querySelector(`.gift-item[data-item-id="${itemId}"]`);
+    if (selectedItem) {
+        selectedItem.classList.add('ring-2', 'ring-amber-500');
+    }
+    
+    console.log('✅ 선물 아이템 선택됨:', itemId);
+};
+
+window.sendGift = async () => {
+    if (!giftTargetId || !selectedGiftItemId) {
+        showToast("Please select an item to send!");
+        return;
+    }
+    
+    if (!confirm("Are you sure you want to send this gift?")) return;
+    
+    try {
+        // state에서 직접 아이템 찾기
+        const myInventory = state.userAccount.inventory || [];
+        const item = myInventory.find(i => i.id === selectedGiftItemId);
+        
+        if (!item) {
+            showToast("Item not found in your inventory!");
+            console.log("Available items:", myInventory.map(i => i.id));
+            console.log("Looking for:", selectedGiftItemId);
+            return;
+        }
+        
+        // 내 인벤토리에서 제거
+        const newMyInventory = myInventory.filter(i => i.id !== selectedGiftItemId);
+        
+        // users 컬렉션 업데이트
+        const userRef = doc(db, 'artifacts', appId, 'users', state.user.uid);
+        await setDoc(userRef, { inventory: newMyInventory }, { merge: true });
+        
+        // accounts 컬렉션도 업데이트
+        const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', state.userAccount.loginId);
+        await setDoc(accountRef, { inventory: newMyInventory }, { merge: true });
+        
+        // 로컬 state 업데이트
+        state.userAccount.inventory = newMyInventory;
+        
+        // 타겟 유저 찾기
+        const targetAccount = state.accounts.find(a => a.loginId === giftTargetId);
+        if (!targetAccount || !targetAccount.uid) {
+            showToast("Target user not found!");
+            return;
+        }
+        
+        // 타겟 인벤토리 가져오기
+        const targetRef = doc(db, 'artifacts', appId, 'users', targetAccount.uid);
+        const targetSnap = await getDoc(targetRef);
+        const targetInventory = targetSnap.exists() ? (targetSnap.data().inventory || []) : [];
+        
+        // 선물 아이템 생성
+        const giftItem = {
+            ...item,
+            giftFrom: state.userAccount.loginId,
+            giftFromName: state.userAccount.ocName,
+            giftedAt: Date.now()
+        };
+        
+        const newTargetInventory = [...targetInventory, giftItem];
+        
+        // 타겟 users 컬렉션 업데이트
+        await setDoc(targetRef, {
+            inventory: newTargetInventory
+        }, { merge: true });
+        
+        // 타겟 accounts 컬렉션도 업데이트
+        const targetAccountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', giftTargetId);
+        await setDoc(targetAccountRef, {
+            inventory: newTargetInventory
+        }, { merge: true });
+        
+        // 알림 생성
+        const notiRef = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
+        await addDoc(notiRef, {
+            targetUserId: giftTargetId,
+            title: "🎁 Gift Received!",
+            message: `${state.userAccount.ocName} sent you ${item.name}`,
+            memo: `From: ${state.userAccount.ocName}`,
+            timestamp: serverTimestamp(),
+            isRead: false
+        });
+        
+        showToast("Gift sent successfully!");
+        closeGiftModal();
+        
+    } catch(e) {
+        console.error("Failed to send gift:", e);
+        showToast("Error sending gift!");
+    }
+};
+
+window.closeGiftModal = () => {
+    const modal = document.getElementById('gift-modal');
+    if (modal) modal.classList.add('hidden');
+    giftTargetId = null;
+    selectedGiftItemId = null;
+};
+
 </script>
 </body>
 </html>
