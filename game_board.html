@@ -1114,8 +1114,9 @@ body::before {
         </div>
         
         <!-- 새 방 만들기 (관리자용) -->
-        <div class="space-y-3">
+        <div id="admin-create-room-area" class="space-y-3 hidden">
             <input type="text" id="new-room-name-input" placeholder="방 이름 (예: 11월 12일 서면의 숲)" class="form-input w-full">
+            <input type="number" id="new-room-max-players-input" placeholder="최대 인원 (기본: 10)" min="1" max="50" value="10" class="form-input w-full">
             <button id="create-game-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4">새 방 만들기</button>
         </div>
     </div>
@@ -1267,11 +1268,12 @@ body::before {
 <script type="module">
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('roomId');
-const homepageUserId = urlParams.get('userId');
+const homepageUserId = urlParams.get('userId'); // uid
+const homepageLoginId = urlParams.get('loginId'); // loginId (accounts 문서 ID)
 const fromHomepage = urlParams.get('fromHomepage') === 'true';
 const homepageUserName = decodeURIComponent(urlParams.get('userName') || 'Unknown');
 const homepageUserImage = decodeURIComponent(urlParams.get('userImage') || '');
-
+const homepageIsAdmin = urlParams.get('isAdmin') === 'true';
 // Combat Stats 파싱
 const homepageStatHp = urlParams.get('statHp') || '100';
 const homepageStatMp = urlParams.get('statMp') || '50';
@@ -1279,7 +1281,63 @@ const homepageStatAtk = decodeURIComponent(urlParams.get('statAtk') || '5-10');
 const homepageStatDef = decodeURIComponent(urlParams.get('statDef') || '2-5');
 const homepageStatMove = urlParams.get('statMove') || '3';
 const homepageUserSkills = decodeURIComponent(urlParams.get('skills') || '').split(',').filter(Boolean);
+// [game_board.html]
 
+// 1. URL에서 ID 가져오기
+
+const currentUserId = urlParams.get('userId'); 
+
+// 2. 전역 변수 초기화 - 홈페이지에서 전달받은 isAdmin 값 사용
+window.isAdmin = homepageIsAdmin;
+
+console.log("🔑 초기 관리자 권한 상태:", {
+    homepageIsAdmin,
+    currentUserId
+});
+
+// 3. ★ 핵심: DB에서 관리자 여부 조회하는 함수 ★
+async function checkAdminAuthority(uid) {
+    if (!uid) return;
+
+    try {
+        // 'users' 컬렉션에서 해당 유저의 문서를 가져옴
+        // (주의: 홈페이지에서 유저 정보를 저장하는 컬렉션 이름이 'users'가 아니라면 수정 필요!)
+        const userRef = doc(db, 'users', uid); 
+        const userSnap = await getDoc(userRef);
+
+        if (userSnap.exists()) {
+            const userData = userSnap.data();
+            
+            // 조건: role이 'staff'이거나, isAdmin이 true인 경우
+            // (홈페이지가 저장하는 방식에 맞춰 조건문을 수정하세요)
+            if (userData.role === 'staff' || userData.isAdmin === true || userData.level >= 99) {
+                
+                window.isAdmin = true; // 권한 부여!
+                console.log("👑 관리자 권한이 확인되었습니다. (DB 검증 완료)");
+
+                // 관리자용 UI (방 생성 패널 등) 즉시 표시
+                const adminPanel = document.getElementById('admin-create-room-area');
+                if (adminPanel) adminPanel.classList.remove('hidden');
+                
+                // 방 목록에 있는 버튼들도 갱신하기 위해 목록 다시 로드
+                if (typeof loadRaidRooms === 'function') loadRaidRooms();
+            }
+        }
+    } catch (error) {
+        console.error("관리자 권한 확인 중 오류:", error);
+    }
+}
+
+// 4. 페이지 로드 시 즉시 실행
+if (currentUserId) {
+    checkAdminAuthority(currentUserId);
+} else if (window.isAdmin) {
+    // URL에서 isAdmin이 true로 전달되었다면 즉시 UI 업데이트
+    console.log("👑 홈페이지에서 관리자 권한 전달받음");
+    const adminPanel = document.getElementById('admin-create-room-area');
+    if (adminPanel) adminPanel.classList.remove('hidden');
+    if (typeof loadRaidRooms === 'function') loadRaidRooms();
+}
 console.log("🎯 URL 파라미터 확인:", {
     userId: homepageUserId,
     fromHomepage,
@@ -1396,6 +1454,24 @@ function watchParticipants(roomId) {
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
+    const appId = 'oc-community-html-v6'; // 홈페이지와 동일한 appId
+
+    // HP/MP 동기화 함수 (홈페이지 연동)
+    async function syncHPtoHomepage(userId, remainingHP, remainingMP) {
+        try {
+            const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', userId);
+            await setDoc(accountRef, {
+                currentHP: remainingHP,
+                currentMP: remainingMP,
+                lastBattleAt: serverTimestamp()
+            }, { merge: true });
+            
+            console.log(`✅ HP/MP synced to homepage: ${userId} - HP=${remainingHP}, MP=${remainingMP}`);
+        } catch(e) {
+            console.error("❌ Failed to sync HP/MP to homepage:", e);
+        }
+    }
+
 function getURLParams() {
     const params = new URLSearchParams(window.location.search);
     return {
@@ -1436,8 +1512,9 @@ const combatTextStartTime = new Date();
     let maxRounds = 0;
     
     let loggedInCharId = null; 
-    let isAdmin = false;       
+    let isAdmin = homepageIsAdmin;  
     let isAdminMoveAllowed = true; 
+    
     const DEFAULT_PC_PASSWORD = "1234";
     const PREDEFINED_EFFECTS = {
     rooted: { id: 'rooted', name: '속박'},
@@ -1563,6 +1640,12 @@ const loginStatusModal = document.getElementById('login-status-modal');
 
     localStorage.setItem('currentGameId', gameId);
     lobbyModal.classList.add('hidden');
+    
+    // 방 목록 리스너 정리
+    if (typeof window.cleanupRoomListeners === 'function') {
+        window.cleanupRoomListeners();
+    }
+    
     gameIdDisplay.value = gameId;
 
     if (isNewGame) {
@@ -1591,115 +1674,46 @@ const loginStatusModal = document.getElementById('login-status-modal');
         localStorage.removeItem('currentGameId'); 
         location.reload(); 
     }
-async function loadRaidRooms() {
-    const roomsRef = collection(db, 'raidRooms');
-    const snapshot = await getDocs(roomsRef);
-    
-    const roomListDiv = document.getElementById('raid-room-list');
-    if (!roomListDiv) return;
-    
-    if (snapshot.empty) {
-        roomListDiv.innerHTML = `
-            <div class="py-20 text-center border border-dashed border-[#D4B783]/20 rounded-sm">
-                <p class="text-[10px] text-[#D4B783]/40 tracking-[0.5em] uppercase">No Signals Detected</p>
-            </div>`;
-        return;
-    }
-    
-    const rooms = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-    }));
-    
-    roomListDiv.innerHTML = rooms.map(room => `
-        <div onclick="joinRaidRoom('${room.id}', '${room.roomName || '이름 없는 방'}')" 
-             class="raid-room-card group relative p-6 mb-4 cursor-pointer transition-all duration-500 bg-white/[0.02] border border-[#D4B783]/20 hover:bg-[#D4B783]/10 hover:border-[#D4B783]/60">
-            
-            <div class="absolute top-0 right-0 w-8 h-[1px] bg-[#D4B783]/30"></div>
-            <div class="absolute top-0 right-0 w-[1px] h-8 bg-[#D4B783]/30"></div>
-            
-            <div class="flex justify-between items-start">
-                <div class="space-y-2">
-                    <p class="text-[8px] text-[#D4B783] font-mono tracking-[0.3em] uppercase opacity-60">
-                        EST-ID: ${room.id.substring(0, 8).toUpperCase()}
-                    </p>
-                    <h4 class="text-2xl font-black text-white italic font-serif tracking-tighter group-hover:text-[#D4B783] transition-colors">
-                        ${room.roomName || '이름 없는 방'}
-                    </h4>
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                        <span class="text-[9px] text-gray-400 font-mono tracking-widest uppercase">Active Connection</span>
-                    </div>
-                </div>
 
-                <div class="flex flex-col items-end gap-1">
-                    <div class="text-[10px] text-[#D4B783] font-bold border border-[#D4B783]/30 px-3 py-1 bg-black/40">
-                        ${room.playerCount || 0} <span class="opacity-40">/</span> 10
-                    </div>
-                    <p class="text-[7px] text-gray-600 font-mono uppercase">Capacity</p>
-                </div>
-            </div>
-
-            <div class="mt-8 pt-4 border-t border-[#D4B783]/10 flex items-end justify-between">
-                <div class="flex gap-1.5">
-                    <div class="w-1 h-3 bg-[#D4B783]"></div>
-                    <div class="w-1 h-3 bg-[#D4B783]/40"></div>
-                    <div class="w-1 h-3 bg-[#D4B783]/10"></div>
-                </div>
-                <div class="flex items-center gap-2 group-hover:translate-x-1 transition-transform">
-                    <span class="text-[10px] text-white/40 font-mono uppercase tracking-tighter">Enter Deployment Zone ></span>
-                </div>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 방 참가 (전역 함수로 선언 - onclick에서 호출 가능하도록)
-window.joinRaidRoom = async function(roomId, roomName) {
-    await joinGame(roomId);
-    showCustomModal("방 참가 완료", `"${roomName}" 방에 입장했습니다.`, [{text:"확인", class:"bg-green-600"}]);
-    
-    // ⭐ 홈페이지에서 온 경우 토큰 자동 생성
-    if (fromHomepage && homepageUserId) {
-        console.log("🎯 방 입장 완료 - 토큰 자동 생성 시작");
-        // 약간의 딜레이를 주어 게임 데이터가 로드되도록 함
-        setTimeout(async () => {
-            await autoLoginHomepageUser(homepageUserId);
-        }, 1000);
-    }
-}
-
-// 새 방 만들기
 async function createRaidRoom() {
     const roomNameInput = document.getElementById('new-room-name-input');
+    const maxPlayersInput = document.getElementById('new-room-max-players-input');
     const roomName = roomNameInput.value.trim();
+    const maxPlayers = parseInt(maxPlayersInput.value) || 10;
     
     if (!roomName) {
         showCustomModal("오류", "방 이름을 입력해주세요.", [{text:"확인", class:"bg-red-600"}]);
         return;
     }
     
+    if (maxPlayers < 1 || maxPlayers > 50) {
+        showCustomModal("오류", "최대 인원은 1~50명 사이로 설정해주세요.", [{text:"확인", class:"bg-red-600"}]);
+        return;
+    }
+    
     const newRoomId = generateGameId();
     
-    // 방 메타데이터 저장
+    // ▼▼▼ [수정됨] 방 메타데이터 저장 부분 ▼▼▼
     await setDoc(doc(db, 'raidRooms', newRoomId), {
         id: newRoomId,
         roomName: roomName,
         createdAt: Date.now(),
-        playerCount: 0
-    });
-    
+        playerCount: 0,
+        maxPlayers: maxPlayers,
+        isLocked: false // ★ 핵심: 초기 잠금 상태 (false: 열림)
+    });    
     // 게임 데이터 초기화
     await joinGame(newRoomId, true);
     
-    showCustomModal("방 생성 완료", `"${roomName}" 방이 생성되었습니다.`, [{text:"확인", class:"bg-green-600"}]);
+    showCustomModal("방 생성 완료", `"${roomName}" 방이 생성되었습니다. (최대 ${maxPlayers}명)`, [{text:"확인", class:"bg-green-600"}]);
     
     // ⭐ 홈페이지에서 온 경우 토큰 자동 생성
-    if (fromHomepage && homepageUserId) {
+    if (typeof fromHomepage !== 'undefined' && fromHomepage && typeof homepageUserId !== 'undefined' && homepageUserId) {
         console.log("🎯 방 생성 완료 - 토큰 자동 생성 시작");
-        // 약간의 딜레이를 주어 게임 데이터가 로드되도록 함
         setTimeout(async () => {
-            await autoLoginHomepageUser(homepageUserId);
+            if (typeof autoLoginHomepageUser === 'function') {
+                await autoLoginHomepageUser(homepageUserId);
+            }
         }, 1000);
     }
 }
@@ -1720,7 +1734,7 @@ onAuthStateChanged(auth, async (user) => {  // ← async 추가!
         // 홈페이지에서 온 경우 방 목록 표시
         if (fromHomepage && homepageUserId) {
             console.log("🎮 홈페이지에서 접속 - 방 목록 표시");
-            await loadRaidRooms(); // 방 목록 로드
+            await loadRaidRooms(); // 방 목록 실시간 리스너 설정
             lobbyModal.classList.remove('hidden'); // 방 목록 모달 표시
         } else {
             // 일반 접속인 경우 기존 로직
@@ -1728,8 +1742,8 @@ onAuthStateChanged(auth, async (user) => {  // ← async 추가!
             if (savedGameId) { 
                 joinGame(savedGameId); 
             } else { 
-                await loadRaidRooms(); // 방 목록 로드
-                lobbyModal.classList.remove('hidden'); 
+                await loadRaidRooms(); // 방 목록 실시간 리스너 설정
+                lobbyModal.classList.remove('hidden');
             }
         }
     } else { 
@@ -2687,6 +2701,40 @@ function isAttackPossible(attacker, target, attackRange) {
     async function updateHP(char, amount, logType) {
         const newHp = Math.min(char.maxHp, Math.max(0, char.hp + amount));
         await updateDoc(doc(db, 'games', gameId, 'characters', char.id), { hp: newHp });
+        
+        // 홈페이지로 실시간 HP 동기화 (PC 캐릭터만)
+        if (char.type === 'PC') {
+            try {
+                // Firestore에서 최신 캐릭터 정보 가져오기
+                const charRef = doc(db, 'games', gameId, 'characters', char.id);
+                const charSnap = await getDoc(charRef);
+                
+                if (charSnap.exists()) {
+                    const charData = charSnap.data();
+                    const loginId = charData.homepageLoginId || charData.homepageUserId; // loginId 우선 사용
+                    
+                    console.log(`🔍 HP 동기화 시도 - 캐릭터:`, char.name);
+                    console.log(`🔍 homepageLoginId:`, loginId);
+                    console.log(`🔍 새 HP:`, newHp, `/`, char.maxHp);
+                    
+                    if (loginId) {
+                        const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+                        await setDoc(accountRef, {
+                            currentHP: newHp,
+                            lastBattleAt: serverTimestamp()
+                        }, { merge: true });
+                        console.log(`✅ 실시간 HP 동기화 완료: ${char.name} (${loginId}) - HP=${newHp}/${char.maxHp}`);
+                    } else {
+                        console.warn(`⚠️ ${char.name}의 homepageLoginId가 없어 HP 동기화 건너뜀`, charData);
+                    }
+                } else {
+                    console.warn(`⚠️ 캐릭터 문서를 찾을 수 없음:`, char.id);
+                }
+            } catch(e) {
+                console.error("❌ 실시간 HP 동기화 실패:", e);
+            }
+        }
+        
         return newHp;
     }
     
@@ -2694,6 +2742,40 @@ function isAttackPossible(attacker, target, attackRange) {
     async function updateMP(char, amount) {
          const newMp = Math.min(char.maxMp, Math.max(0, char.mp + amount));
          await updateDoc(doc(db, 'games', gameId, 'characters', char.id), { mp: newMp });
+         
+         // 홈페이지로 실시간 MP 동기화 (PC 캐릭터만)
+         if (char.type === 'PC') {
+             try {
+                 // Firestore에서 최신 캐릭터 정보 가져오기
+                 const charRef = doc(db, 'games', gameId, 'characters', char.id);
+                 const charSnap = await getDoc(charRef);
+                 
+                 if (charSnap.exists()) {
+                     const charData = charSnap.data();
+                     const loginId = charData.homepageLoginId || charData.homepageUserId; // loginId 우선 사용
+                     
+                     console.log(`🔍 MP 동기화 시도 - 캐릭터:`, char.name);
+                     console.log(`🔍 homepageLoginId:`, loginId);
+                     console.log(`🔍 새 MP:`, newMp, `/`, char.maxMp);
+                     
+                     if (loginId) {
+                         const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+                         await setDoc(accountRef, {
+                             currentMP: newMp,
+                             lastBattleAt: serverTimestamp()
+                         }, { merge: true });
+                         console.log(`✅ 실시간 MP 동기화 완료: ${char.name} (${loginId}) - MP=${newMp}/${char.maxMp}`);
+                     } else {
+                         console.warn(`⚠️ ${char.name}의 homepageLoginId가 없어 MP 동기화 건너뜀`, charData);
+                     }
+                 } else {
+                     console.warn(`⚠️ 캐릭터 문서를 찾을 수 없음:`, char.id);
+                 }
+             } catch(e) {
+                 console.error("❌ 실시간 MP 동기화 실패:", e);
+             }
+         }
+         
          return newMp;
     }
 
@@ -2972,8 +3054,16 @@ async function applyStatusEffect(target, effectInfo) {
     if (gameResult) {
         await setDoc(doc(db, 'games', gameId), { 
             gameState: 'ENDED',
-            gameResult: gameResult // 모든 유저가 이 정보를 보고 팝업을 띄우게 됩니다.
+            gameResult: gameResult
         }, { merge: true });
+        
+        // 게임 종료 시 모든 캐릭터의 HP/MP를 홈페이지에 동기화
+        for (const char of characters) {
+            if (char.userId && char.type === 'PC') {
+                await syncHPtoHomepage(char.userId, char.currentHP || 0, char.currentMP || 0);
+            }
+        }
+        
         return true; // 게임 종료됨
     }
 
@@ -3117,6 +3207,63 @@ async function applyStatusEffect(target, effectInfo) {
         errorP.textContent = '비밀번호가 올바르지 않습니다.';
     }
 }
+
+// ⭐ 홈페이지 HP/MP 실시간 동기화 리스너
+let hpMpListenerUnsubscribe = null;
+
+function setupHomepageHPMPListener(loginId, characterId) {
+    // 기존 리스너가 있으면 해제
+    if (hpMpListenerUnsubscribe) {
+        hpMpListenerUnsubscribe();
+    }
+    
+    console.log(`🔔 HP/MP 실시간 리스너 설정: loginId=${loginId}, charId=${characterId}`);
+    
+    // 홈페이지 accounts 문서 감시 (loginId 사용)
+    const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+    
+    hpMpListenerUnsubscribe = onSnapshot(accountRef, async (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            
+            if (data.currentHP !== undefined || data.currentMP !== undefined) {
+                const currentHP = data.currentHP;
+                const currentMP = data.currentMP;
+                
+                console.log(`🔄 홈페이지 HP/MP 변경 감지: HP=${currentHP}, MP=${currentMP}`);
+                
+                // 게임보드 캐릭터 업데이트
+                try {
+                    const charRef = doc(db, 'games', gameId, 'characters', characterId);
+                    const charSnap = await getDoc(charRef);
+                    
+                    if (charSnap.exists()) {
+                        const charData = charSnap.data();
+                        const updates = {};
+                        
+                        if (currentHP !== undefined && currentHP !== charData.hp) {
+                            updates.hp = currentHP;
+                            console.log(`✅ 게임보드 HP 업데이트: ${charData.hp} → ${currentHP}`);
+                        }
+                        
+                        if (currentMP !== undefined && currentMP !== charData.mp) {
+                            updates.mp = currentMP;
+                            console.log(`✅ 게임보드 MP 업데이트: ${charData.mp} → ${currentMP}`);
+                        }
+                        
+                        if (Object.keys(updates).length > 0) {
+                            await updateDoc(charRef, updates);
+                            console.log(`✅ 게임보드 캐릭터 동기화 완료`);
+                        }
+                    }
+                } catch(e) {
+                    console.error("❌ 게임보드 HP/MP 동기화 실패:", e);
+                }
+            }
+        }
+    });
+}
+
 // 홈페이지 유저 기반 자동 토큰 생성 및 로그인
 async function autoLoginHomepageUser(userId) {
     console.log("🎮 autoLoginHomepageUser 호출:", userId);
@@ -3135,9 +3282,36 @@ async function autoLoginHomepageUser(userId) {
     console.log("👤 사용자 ID:", userId);
     console.log("📦 캐릭터 배열:", characters.length, "개");
     
+    // ⭐ 홈페이지에서 현재 HP/MP 가져오기
+    let currentHP = null;
+    let currentMP = null;
+    
+    try {
+        // loginId를 사용하여 accounts 문서 접근
+        const accountId = homepageLoginId || userId; // loginId 우선, 없으면 userId
+        const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', accountId);
+        const accountSnap = await getDoc(accountRef);
+        
+        if (accountSnap.exists()) {
+            const accountData = accountSnap.data();
+            currentHP = accountData.currentHP;
+            currentMP = accountData.currentMP;
+            console.log("🏥 홈페이지에서 HP/MP 가져오기 성공:", { currentHP, currentMP, accountId });
+        } else {
+            console.log("⚠️ 홈페이지에서 HP/MP 데이터를 찾을 수 없음 - 기본값 사용. accountId:", accountId);
+        }
+    } catch (error) {
+        console.error("❌ 홈페이지 HP/MP 가져오기 실패:", error);
+    }
+    
     // Combat Stats 파싱 (기존 토큰 업데이트에도 사용)
-    const hp = parseInt(homepageStatHp) || 100;
-    const mp = parseInt(homepageStatMp) || 50;
+    const maxHp = parseInt(homepageStatHp) || 100;
+    const maxMp = parseInt(homepageStatMp) || 50;
+    
+    // 현재 HP/MP가 없으면 최대값 사용
+    const hp = currentHP !== null && currentHP !== undefined ? currentHP : maxHp;
+    const mp = currentMP !== null && currentMP !== undefined ? currentMP : maxMp;
+    
     const [minAtk, maxAtk] = homepageStatAtk.split('-').map(v => parseInt(v.trim()) || 5);
     const [minDef, maxDef] = homepageStatDef.split('-').map(v => parseInt(v.trim()) || 2);
     const moveRange = parseInt(homepageStatMove) || 3;
@@ -3146,7 +3320,7 @@ async function autoLoginHomepageUser(userId) {
     const finalSkills = homepageUserSkills.length > 0 ? homepageUserSkills : ['move', 'slash', 'heal'];
     
     console.log("🎯 파싱된 데이터:", {
-        hp, mp, minAtk, maxAtk, minDef, maxDef, moveRange, 
+        hp, mp, maxHp, maxMp, minAtk, maxAtk, minDef, maxDef, moveRange, 
         skills: finalSkills
     });
 
@@ -3158,33 +3332,38 @@ async function autoLoginHomepageUser(userId) {
     
     if (existingToken) {
         console.log("♻️ 기존 토큰 발견 - 자동 로그인:", existingToken.id);
-        // 기존 토큰의 정보를 업데이트하고 로그인 처리
+        // 기존 토큰의 정보를 업데이트하고 로그인 처리 (HP/MP 포함)
         await updateDoc(doc(db, 'games', gameId, 'characters', existingToken.id), { 
             isLoggedIn: true,
             name: homepageUserName,
             imageUrl: homepageUserImage,
-            hp: hp, // 현재 HP도 업데이트 (필요시)
-            maxHP: hp,
-            maxHp: hp,
-            mp: mp, // 현재 MP도 업데이트 (필요시)
-            maxMP: mp,
-            maxMp: mp,
+            hp: hp, // 홈페이지에서 가져온 현재 HP
+            maxHP: maxHp,
+            maxHp: maxHp,
+            mp: mp, // 홈페이지에서 가져온 현재 MP
+            maxMP: maxMp,
+            maxMp: maxMp,
             minAttack: minAtk,
             maxAttack: maxAtk,
             minDefense: minDef,
             maxDefense: maxDef,
             moveRange: moveRange,
-            skills: finalSkills
+            skills: finalSkills,
+            homepageLoginId: homepageLoginId || userId // ⭐ loginId 저장
         });
         
         loggedInCharId = existingToken.id;
         isAdmin = false;
         updateAuthStatus();
         
-        console.log("✅ 기존 토큰으로 자동 로그인 완료");
+        // ⭐ 홈페이지 HP/MP 실시간 동기화 리스너 설정 (loginId 사용)
+        const accountId = homepageLoginId || userId;
+        setupHomepageHPMPListener(accountId, existingToken.id);
+        
+        console.log("✅ 기존 토큰으로 자동 로그인 완료 (HP/MP 동기화됨)");
         showCustomModal(
             "자동 로그인", 
-            `${homepageUserName}(으)로 접속했습니다.`, 
+            `${homepageUserName}(으)로 접속했습니다.\nHP: ${hp}/${maxHp}, MP: ${mp}/${maxMp}`, 
             [{text:"확인", class:"bg-green-600"}]
         );
         return;
@@ -3200,18 +3379,19 @@ async function autoLoginHomepageUser(userId) {
         id: newTokenId,
         name: homepageUserName,
         type: 'PC',
-        hp: hp,
-        maxHP: hp,
-        maxHp: hp,
-        mp: mp,
-        maxMP: mp,
-        maxMp: mp,
+        hp: hp, // 홈페이지에서 가져온 현재 HP
+        maxHP: maxHp,
+        maxHp: maxHp,
+        mp: mp, // 홈페이지에서 가져온 현재 MP
+        maxMP: maxMp,
+        maxMp: maxMp,
         x: null,  // 미배치 상태
         y: null,  // 미배치 상태
         position: null,
         imageUrl: homepageUserImage,
         password: userId,
         homepageUserId: userId,
+        homepageLoginId: homepageLoginId || userId, // ⭐ loginId 저장
         isLoggedIn: true,
         description: '홈페이지에서 접속한 유저입니다.',
         turnOrder: 999,
@@ -3240,6 +3420,10 @@ async function autoLoginHomepageUser(userId) {
     updateAuthStatus();
     
     console.log("✅ 자동 로그인 완료 - 토큰 ID:", loggedInCharId);
+    
+    // ⭐ 홈페이지 HP/MP 실시간 동기화 리스너 설정 (loginId 사용)
+    const accountId = homepageLoginId || userId;
+    setupHomepageHPMPListener(accountId, newTokenId);
     
     showCustomModal(
         "새 토큰 생성 완료", 
@@ -4226,6 +4410,23 @@ function renderLoginStatus() {
                 }
                 
                 if (gameId) await updateDoc(doc(db, 'games', gameId, 'characters', character.id), updates);
+                
+                // ⭐ PC 캐릭터의 경우 홈페이지로 HP/MP 동기화
+                if (character.type === 'PC' && (character.homepageLoginId || character.homepageUserId)) {
+                    try {
+                        const loginId = character.homepageLoginId || character.homepageUserId;
+                        const accountRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', loginId);
+                        await setDoc(accountRef, {
+                            currentHP: updates.hp,
+                            currentMP: updates.mp,
+                            lastBattleAt: serverTimestamp()
+                        }, { merge: true });
+                        console.log(`✅ 캐릭터 수정 시 홈페이지 HP/MP 동기화 완료: ${character.name} (${loginId}) - HP=${updates.hp}/${updates.maxHp}, MP=${updates.mp}/${updates.maxMp}`);
+                    } catch(e) {
+                        console.error("❌ 홈페이지 HP/MP 동기화 실패:", e);
+                    }
+                }
+                
                 openProfileModal({...character, ...updates}, false);
             };
             document.getElementById('cancel-edit-btn').onclick = () => openProfileModal(character, false);
@@ -4424,16 +4625,15 @@ async function resetAllCharacterStats() {
             snapshot.docs.forEach(charDoc => {
                 const charData = charDoc.data();
                 batch.update(charDoc.ref, {
-                    hp: charData.maxHp, // 현재 HP를 최대 HP로 설정
-                    mp: charData.maxMp, // MP도 최대 MP로 설정
+                    // HP/MP는 현재 상태 유지 (회복하지 않음)
                     x: null,             // 보드에서 배치 해제
                     y: null,
-                    statusEffects: [],   // 모든 상태 효과(버프/디버프)도 제거
-                    nextAction: deleteField() // ❗️ [추가] 예고된 행동 정보를 삭제합니다.
+                    statusEffects: [],   // 모든 상태 효과(버프/디버프)만 제거
+                    nextAction: deleteField() // 예고된 행동 정보를 삭제
                 });
             });
             await batch.commit();
-            console.log('All character stats, status effects, and positions have been reset.');
+            console.log('All character positions, status effects have been reset (HP/MP preserved).');
         }
     }
 
@@ -4451,7 +4651,7 @@ async function resetAllCharacterStats() {
         gameResult: deleteField() 
     }, { merge: true });
 
-    await logAction(`⚠️ 관리자가 전체 게임을 초기화했습니다. 모든 캐릭터의 HP가 회복되고 재배치를 기다립니다.`, "admin");
+    await logAction(`⚠️ 관리자가 전체 게임을 초기화했습니다. 캐릭터들이 재배치를 기다립니다. (HP/MP 유지)`, "admin");
 }
 
 
@@ -5731,6 +5931,330 @@ async function exportSkillsToJson() {
     }
 }
 
+
+function updateAdminUI() {
+    const createArea = document.getElementById('admin-create-room-area');
+    if (createArea) {
+        if (isAdmin) createArea.classList.remove('hidden');
+        else createArea.classList.add('hidden');
+    }
+}
+
+
+window.joinRaidRoom = async function(roomId, roomName, isLocked, currentPlayers = 0, maxPlayers = 10) {
+    console.log(`Trying to join room: ${roomId}, Locked: ${isLocked}, Players: ${currentPlayers}/${maxPlayers}`);
+
+    // 1. 잠긴 방 체크 (관리자가 아니면 입장 불가)
+    if (isLocked) {
+        if (!isAdmin) {
+            alert("⛔ [ACCESS DENIED]\n\n현재 작전 준비 중인 구역입니다.\n관리자에 의해 잠겨있습니다.");
+            return; 
+        }
+    }
+
+    // 2. 인원 제한 체크 (관리자는 예외)
+    if (!isAdmin && currentPlayers >= maxPlayers) {
+        alert(`⛔ [ROOM FULL]\n\n방이 가득 찼습니다.\n현재 인원: ${currentPlayers}/${maxPlayers}`);
+        return;
+    }
+
+    // 3. 입장 로직
+    await joinGame(roomId);
+    
+    // 알림 메시지
+    if (typeof showCustomModal === 'function') {
+        showCustomModal("방 참가 완료", `"${roomName}" 방에 입장했습니다.`, [{text:"확인", class:"bg-green-600"}]);
+    } else {
+        alert(`"${roomName}" 방에 입장했습니다.`);
+    }
+    
+    // 4. 홈페이지 연동 토큰 생성
+    if (typeof fromHomepage !== 'undefined' && fromHomepage && typeof homepageUserId !== 'undefined' && homepageUserId) {
+        console.log("🎯 방 입장 완료 - 토큰 자동 생성 시작");
+        setTimeout(async () => {
+            if (typeof autoLoginHomepageUser === 'function') {
+                await autoLoginHomepageUser(homepageUserId);
+            }
+        }, 1000);
+    }
+};
+
+// [방 이름 및 최대 인원 편집 함수]
+window.editRoomName = async function(roomId, currentName, currentMaxPlayers) {
+    if (!isAdmin) return; // 관리자만 실행 가능
+    event.stopPropagation(); // 부모 클릭 방지
+    
+    const newName = prompt("새 방 이름을 입력하세요:", currentName);
+    if (!newName || newName.trim() === '') return;
+    
+    const newMaxPlayers = prompt("최대 인원을 입력하세요 (1~50):", currentMaxPlayers);
+    if (!newMaxPlayers) return;
+    
+    const maxPlayers = parseInt(newMaxPlayers);
+    if (isNaN(maxPlayers) || maxPlayers < 1 || maxPlayers > 50) {
+        alert("최대 인원은 1~50 사이의 숫자여야 합니다.");
+        return;
+    }
+    
+    try {
+        await updateDoc(doc(db, 'raidRooms', roomId), { 
+            roomName: newName.trim(),
+            maxPlayers: maxPlayers
+        });
+        window.loadRaidRooms(); // 목록 새로고침
+        alert(`방 정보가 수정되었습니다.\n이름: ${newName}\n최대 인원: ${maxPlayers}명`);
+    } catch (e) {
+        console.error("방 편집 오류:", e);
+        alert("방 편집 중 오류가 발생했습니다.");
+    }
+};
+
+// [방 잠금 토글 함수]
+window.toggleRoomLock = async function(roomId, currentStatus) {
+    if (!isAdmin) return; // 관리자만 실행 가능
+    event.stopPropagation(); // 부모 클릭 방지
+    try {
+        await updateDoc(doc(db, 'raidRooms', roomId), { isLocked: !currentStatus });
+        // 실시간 리스너가 자동으로 업데이트하므로 loadRaidRooms() 호출 불필요
+    } catch (e) {
+        console.error("잠금 설정 오류:", e);
+        alert("오류가 발생했습니다.");
+    }
+};
+
+// [방 삭제 함수]
+window.deleteRoom = async function(roomId) {
+    if (!isAdmin) return; // 관리자만 실행 가능
+    event.stopPropagation(); // 부모 클릭 방지
+    if (!confirm("정말 이 방을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) return;
+
+    try {
+        await deleteDoc(doc(db, 'raidRooms', roomId));
+        // 실시간 리스너가 자동으로 업데이트하므로 loadRaidRooms() 호출 불필요
+    } catch (e) {
+        console.error("삭제 오류:", e);
+        alert("삭제 중 오류가 발생했습니다.");
+    }
+};
+
+// =========================================================
+// 2. 방 목록 실시간 리스너 (깜빡임 없는 부드러운 업데이트)
+// =========================================================
+let roomListUnsubscribe = null; // 리스너 해제 함수 저장
+const roomParticipantListeners = {}; // 각 방의 참가자 리스너 저장
+
+window.loadRaidRooms = async function() {
+    console.log("Setting up raid rooms listener... isAdmin:", isAdmin);
+
+    const roomListDiv = document.getElementById('raid-room-list');
+    if (!roomListDiv) return;
+    
+    // [UI] 관리자용 '새 방 만들기' 창 표시/숨김 처리
+    const createArea = document.getElementById('admin-create-room-area');
+    if (createArea) {
+        if (isAdmin) createArea.classList.remove('hidden');
+        else createArea.classList.add('hidden');
+    }
+
+    // 기존 리스너가 있으면 해제
+    if (roomListUnsubscribe) {
+        roomListUnsubscribe();
+    }
+    
+    // 기존 참가자 리스너들 모두 해제
+    Object.values(roomParticipantListeners).forEach(unsubscribe => unsubscribe());
+    Object.keys(roomParticipantListeners).forEach(key => delete roomParticipantListeners[key]);
+
+    // 방 목록 실시간 리스너 설정
+    const roomsRef = collection(db, 'raidRooms');
+    let q;
+    try {
+        q = query(roomsRef, orderBy("createdAt", "desc"));
+    } catch (e) {
+        console.warn("Index error, using default query", e);
+        q = roomsRef;
+    }
+    
+    roomListUnsubscribe = onSnapshot(q, (snapshot) => {
+        // 방이 없을 때
+        if (snapshot.empty) {
+            roomListDiv.innerHTML = `
+                <div class="py-20 text-center border border-dashed border-[#D4B783]/20 rounded-sm">
+                    <p class="text-[10px] text-[#D4B783]/40 tracking-[0.5em] uppercase">No Signals Detected</p>
+                </div>`;
+            return;
+        }
+        
+        const rooms = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+        
+        // 기존 카드들을 Map으로 저장 (ID를 키로)
+        const existingCards = new Map();
+        Array.from(roomListDiv.children).forEach(card => {
+            const roomId = card.dataset.roomId;
+            if (roomId) existingCards.set(roomId, card);
+        });
+        
+        // 새로운 순서대로 카드 배치
+        const newCards = [];
+        rooms.forEach(room => {
+            let card = existingCards.get(room.id);
+            
+            if (!card) {
+                // 새 방이면 카드 생성
+                card = createRoomCard(room);
+                setupParticipantListener(room.id, card);
+            } else {
+                // 기존 방이면 내용만 업데이트
+                updateRoomCard(card, room);
+            }
+            
+            newCards.push(card);
+            existingCards.delete(room.id);
+        });
+        
+        // 삭제된 방의 리스너 해제
+        existingCards.forEach((card, roomId) => {
+            if (roomParticipantListeners[roomId]) {
+                roomParticipantListeners[roomId]();
+                delete roomParticipantListeners[roomId];
+            }
+        });
+        
+        // DOM 업데이트 (순서 유지)
+        roomListDiv.innerHTML = '';
+        newCards.forEach(card => roomListDiv.appendChild(card));
+    });
+};
+
+// 방 카드 생성 함수
+function createRoomCard(room) {
+    const card = document.createElement('div');
+    card.dataset.roomId = room.id;
+    card.dataset.playerCount = '0'; // 초기값
+    card.dataset.maxPlayers = room.maxPlayers || '10'; // 최대 인원
+    card.dataset.roomName = room.roomName || room.name || 'Unnamed Sector';
+    card.dataset.isLocked = room.isLocked || false;
+    card.className = 'raid-room-card group relative p-6 mb-4 cursor-pointer transition-all duration-500 border';
+    
+    updateRoomCard(card, room);
+    return card;
+}
+
+// 방 카드 업데이트 함수 (깜빡임 없이 내용만 변경)
+function updateRoomCard(card, room) {
+    const isLocked = room.isLocked || false;
+    const roomName = room.roomName || room.name || 'Unnamed Sector';
+    const maxPlayers = room.maxPlayers || 10;
+    const actualPlayerCount = parseInt(card.dataset.playerCount) || 0;
+    
+    // 카드 데이터 속성 업데이트
+    card.dataset.maxPlayers = maxPlayers;
+    card.dataset.roomName = roomName;
+    card.dataset.isLocked = isLocked;
+    
+    // 클래스 업데이트
+    const cardClass = isLocked 
+        ? 'opacity-75 border-red-900/50 bg-black/60' 
+        : 'bg-white/[0.02] border-[#D4B783]/20 hover:bg-[#D4B783]/10 hover:border-[#D4B783]/60';
+    card.className = `raid-room-card group relative p-6 mb-4 cursor-pointer transition-all duration-500 border ${cardClass}`;
+    
+    const lockLabel = isLocked 
+        ? '<span class="text-red-500 text-[10px] ml-2 font-bold animate-pulse">[LOCKED]</span>' 
+        : '';
+
+    // 관리자 버튼 (오른쪽 아래로 변경)
+    const adminButtons = isAdmin ? `
+        <div class="absolute bottom-2 right-2 flex gap-1 z-20" onclick="event.stopPropagation()">
+            <button onclick="window.editRoomName('${room.id}', '${roomName.replace(/'/g, "\\'")}', ${maxPlayers})" 
+                    class="w-8 h-8 flex items-center justify-center bg-black/80 hover:bg-blue-700 border border-blue-600 rounded text-sm transition-colors"
+                    title="방 이름 편집">
+                ✏️
+            </button>
+            <button onclick="window.toggleRoomLock('${room.id}', ${isLocked})" 
+                    class="w-8 h-8 flex items-center justify-center bg-black/80 hover:bg-gray-700 border border-gray-600 rounded text-sm transition-colors"
+                    title="${isLocked ? '잠금 해제' : '방 잠금'}">
+                ${isLocked ? '🔒' : '🔓'}
+            </button>
+            <button onclick="window.deleteRoom('${room.id}')" 
+                    class="w-8 h-8 flex items-center justify-center bg-black/80 hover:bg-red-900 border border-red-900/50 rounded text-sm transition-colors"
+                    title="방 삭제">
+                🗑️
+            </button>
+        </div>
+    ` : '';
+
+    card.onclick = () => window.joinRaidRoom(room.id, roomName, isLocked, actualPlayerCount, maxPlayers);
+    card.innerHTML = `
+        ${adminButtons}
+
+        <div class="absolute top-0 right-0 w-8 h-[1px] bg-[#D4B783]/30"></div>
+        <div class="absolute top-0 right-0 w-[1px] h-8 bg-[#D4B783]/30"></div>
+        
+        <div class="flex justify-between items-start">
+            <div class="space-y-2">
+                <p class="text-[8px] text-[#D4B783] font-mono tracking-[0.3em] uppercase opacity-60">
+                    EST-ID: ${room.id.substring(0, 8).toUpperCase()}
+                </p>
+                <h4 class="text-2xl font-black text-white italic font-serif tracking-tighter group-hover:text-[#D4B783] transition-colors">
+                    ${roomName} ${lockLabel}
+                </h4>
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 ${isLocked ? 'bg-red-500' : 'bg-green-500'} rounded-full animate-pulse"></span>
+                    <span class="text-[9px] text-gray-400 font-mono tracking-widest uppercase">
+                        ${isLocked ? 'Restricted Area' : 'Active Connection'}
+                    </span>
+                </div>
+            </div>
+
+            <div class="flex flex-col items-end gap-1">
+                <div class="text-[10px] text-[#D4B783] font-bold border border-[#D4B783]/30 px-3 py-1 bg-black/40" data-player-count-display>
+                    ${actualPlayerCount} <span class="opacity-40">/</span> ${maxPlayers}
+                </div>
+                <p class="text-[7px] text-gray-600 font-mono uppercase">Capacity</p>
+            </div>
+        </div>
+    `;
+}
+
+// 각 방의 참가자 수 실시간 리스너 설정
+function setupParticipantListener(roomId, card) {
+    const participantsRef = collection(db, 'raidRooms', roomId, 'participants');
+    
+    console.log(`🔔 Setting up participant listener for room: ${roomId}`);
+    
+    roomParticipantListeners[roomId] = onSnapshot(participantsRef, (snapshot) => {
+        const playerCount = snapshot.size;
+        card.dataset.playerCount = playerCount;
+        
+        console.log(`👥 Room ${roomId} participant count updated: ${playerCount}`);
+        
+        // 인원 수 표시만 업데이트 (깜빡임 최소화)
+        const countDisplay = card.querySelector('[data-player-count-display]');
+        if (countDisplay) {
+            // maxPlayers를 카드의 데이터에서 가져오기
+            const maxPlayers = card.dataset.maxPlayers || '10';
+            countDisplay.innerHTML = `${playerCount} <span class="opacity-40">/</span> ${maxPlayers}`;
+            
+            // 클릭 이벤트도 업데이트 (현재 인원 수 반영)
+            const roomName = card.dataset.roomName || 'Unknown';
+            const isLocked = card.dataset.isLocked === 'true';
+            card.onclick = () => window.joinRaidRoom(roomId, roomName, isLocked, playerCount, parseInt(maxPlayers));
+        }
+    });
+}
+
+// 리스너 정리 함수
+window.cleanupRoomListeners = function() {
+    if (roomListUnsubscribe) {
+        roomListUnsubscribe();
+        roomListUnsubscribe = null;
+    }
+    Object.values(roomParticipantListeners).forEach(unsubscribe => unsubscribe());
+    Object.keys(roomParticipantListeners).forEach(key => delete roomParticipantListeners[key]);
+};
 </script>
 </body>
 </html>
