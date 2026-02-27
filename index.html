@@ -417,7 +417,7 @@ window.limit = limit;
             selectedRoomId: null,
             initDone: false,
             world: {
-                title: "REVERSE: 1999 STYLE HUB",
+                title: "REVERSE: STYLE HUB",
                 description: "Keep moving forward."
             },
             investigation: {
@@ -4958,194 +4958,264 @@ let gachaPool = [
 ];
 
 window.renderGacha = async () => {
-    // Item Master에서 가챠 아이템 불러오기
+    // 1. 기존 가챠 풀 로드 로직
     try {
         const itemsRef = collection(db, 'artifacts', appId, 'public', 'data', 'item_master');
         const itemsSnap = await getDocs(itemsRef);
-        
         const gachaItems = [];
         itemsSnap.forEach(doc => {
             const item = doc.data();
-            // inGacha가 true인 아이템만 가챠 풀에 추가
             if (item.availability?.inGacha && !item.availability?.unavailable) {
                 gachaItems.push({
-                    id: item.id,
-                    name: item.name,
-                    rarity: item.rarity,
-                    chance: item.gachaChance || 5,
-                    icon: item.icon || '📦',
-                    description: item.description || ''
+                    id: item.id, name: item.name, rarity: item.rarity,
+                    chance: item.gachaChance || 5, icon: item.icon || '📦', description: item.description || ''
                 });
             }
         });
-        
-        // 가챠 아이템이 있으면 사용, 없으면 기본 목록 사용
-        if (gachaItems.length > 0) {
-            gachaPool = gachaItems;
-            console.log("✅ Item Master에서 가챠 풀 로드:", gachaItems.length, "개 아이템");
-        } else {
-            console.log("⚠️ 가챠 아이템이 없어 기본 풀 사용");
-        }
-    } catch(e) { 
-        console.log("Using default gacha pool:", e); 
-    }
+        if (gachaItems.length > 0) gachaPool = gachaItems;
+    } catch(e) { console.log("Using default gacha pool:", e); }
 
     const contentArea = document.getElementById('content-area');
+    
+    // 2. 메인 UI 렌더링 (하얀색 플래시 효과 제거됨)
     contentArea.innerHTML = `
-        <div class="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden animate-fade-in relative h-full">
-            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
-            <div class="absolute inset-0 bg-gradient-to-r from-purple-900/20 via-black to-purple-900/20 pointer-events-none"></div>
+        <div class="flex-1 flex flex-col bg-[#050505] overflow-hidden animate-fade-in relative h-full font-serif text-[#d4b783] select-none">
+            
+            <div class="absolute inset-0 opacity-20 pointer-events-none" 
+                 style="background: repeating-radial-gradient(circle at 50% 50%, transparent, transparent 15px, rgba(212,183,131,0.1) 16px, transparent 17px);"></div>
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_20%,_#050505_80%)] pointer-events-none"></div>
 
-            <div class="p-8 border-b border-white/5 flex justify-between items-center bg-black/40 backdrop-blur-xl z-20">
-                <div>
-                    <h2 class="text-3xl font-black text-purple-400 uppercase italic tracking-tighter">Wheel of Fate</h2>
-                    <p class="text-[10px] text-neutral-500 uppercase tracking-widest mt-1">Probability Generator</p>
+            <div class="absolute top-0 left-0 w-full p-8 flex justify-between items-start z-30 pointer-events-none">
+                <div class="pointer-events-auto">
+                    <button onclick="openMiniGameHub()" class="flex items-center gap-2 text-neutral-500 hover:text-[#d4b783] transition-colors text-xs font-bold uppercase tracking-widest font-sans">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Leave Ritual
+                    </button>
                 </div>
-                <div class="flex gap-4">
-                    <button onclick="openMiniGameHub()" class="px-4 py-2 border border-white/10 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all">EXIT</button>
-                </div>
-            </div>
-
-            <div class="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
-                <div id="gacha-result-area" class="hidden absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center" onclick="this.classList.add('hidden')">
-                    <div id="gacha-result-content" class="text-center transform scale-0 transition-transform duration-500">
-                        </div>
-                    <p class="text-white/30 text-[10px] mt-12 animate-pulse uppercase tracking-[0.5em]">Click anywhere to close</p>
-                </div>
-
-                <div class="relative w-96 h-96 rounded-full border-4 border-purple-900/30 flex items-center justify-center mb-12 shadow-[0_0_100px_rgba(147,51,234,0.3)]">
-                    <div class="absolute inset-0 rounded-full border border-white/10 animate-[spin_10s_linear_infinite]"></div>
-                    <div class="absolute inset-4 rounded-full border border-white/5 animate-[spin_15s_linear_infinite_reverse]"></div>
-                    
-                    <div class="text-center z-10 space-y-6">
-                        <div class="text-purple-500 mb-2 animate-bounce"><i data-lucide="sparkles" class="w-12 h-12 mx-auto"></i></div>
-                        <h3 class="text-2xl font-serif font-black text-white uppercase tracking-widest">Summon</h3>
-                        <div class="flex flex-col gap-3">
-                            <button onclick="pullGacha(1)" class="w-48 py-4 bg-white text-black font-black uppercase rounded-full hover:bg-purple-400 hover:scale-105 transition-all shadow-xl text-xs tracking-widest">
-                                Pull 1x
-                            </button>
-                            <button onclick="pullGacha(10)" class="w-48 py-4 bg-purple-900 border border-purple-500 text-white font-black uppercase rounded-full hover:bg-purple-700 hover:scale-105 transition-all shadow-xl text-xs tracking-widest">
-                                Pull 10x
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="absolute bottom-8 right-8 text-right opacity-50 bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/5">
-                    <h4 class="text-[10px] font-bold text-white uppercase mb-2 tracking-widest border-b border-white/10 pb-2">Drop Rates</h4>
-                    <ul class="text-[9px] text-neutral-400 space-y-1 font-mono">
-                        ${gachaPool.map(i => `<li>${i.name}: <span class="text-purple-400">${i.chance}%</span></li>`).join('')}
-                    </ul>
-                </div>
-                
-                <!-- 최근 뽑기 기록 -->
-                <div class="absolute bottom-8 left-8 text-left bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/5 max-w-md">
-                    <h4 class="text-[10px] font-bold text-white uppercase mb-3 tracking-widest border-b border-white/10 pb-2">Recent Pulls</h4>
-                    <div id="gacha-recent-history" class="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                        <p class="text-[9px] text-neutral-600 italic">Loading...</p>
+                <div class="text-right">
+                    <p class="text-[9px] uppercase tracking-[0.4em] opacity-50 font-sans mb-1">Current Assets</p>
+                    <div class="flex items-center justify-end gap-2 text-amber-500">
+                        <i data-lucide="coins" class="w-4 h-4"></i>
+                        <span class="text-xl font-mono">${state.userAccount.coins ? state.userAccount.coins.toLocaleString() : 0}</span>
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div id="gacha-admin-modal" class="hidden fixed inset-0 z-[100] bg-black/90 flex items-center justify-center backdrop-blur-md">
-            <div class="w-full max-w-lg bg-neutral-900 border border-purple-500/30 p-8 rounded-3xl shadow-2xl">
-                <h3 class="text-xl font-bold text-white mb-4 uppercase">Configuration</h3>
-                <textarea id="gacha-json-input" class="w-full h-64 bg-black border border-white/10 rounded-xl p-4 text-xs font-mono text-green-400 outline-none resize-none mb-4 custom-scrollbar">${JSON.stringify(gachaPool, null, 4)}</textarea>
-                <div class="flex gap-4">
-                    <button onclick="document.getElementById('gacha-admin-modal').classList.add('hidden')" class="flex-1 py-3 bg-neutral-800 text-neutral-400 text-xs font-bold rounded-xl hover:text-white uppercase">Cancel</button>
-                    <button onclick="saveGachaConfig()" class="flex-1 py-3 bg-purple-600 text-white text-xs font-bold rounded-xl hover:bg-purple-700 uppercase">Save Config</button>
+
+            <div class="flex-1 flex items-center justify-center relative z-20 mt-10">
+                <div id="mystic-wheel" class="relative w-[400px] h-[400px] md:w-[500px] md:h-[500px] flex items-center justify-center transition-transform duration-[2000ms] ease-in-out">
+                    <div class="absolute inset-0 rounded-full border border-[#d4b783]/20 animate-[spin_40s_linear_infinite]">
+                        <div class="absolute -top-1 left-1/2 w-2 h-2 bg-[#d4b783] rotate-45 shadow-[0_0_10px_#d4b783]"></div>
+                        <div class="absolute -bottom-1 left-1/2 w-2 h-2 bg-[#d4b783] rotate-45"></div>
+                    </div>
+                    <div class="absolute inset-8 rounded-full border border-[#d4b783]/10 animate-[spin_25s_linear_infinite_reverse]">
+                        <div class="absolute top-1/2 -left-1.5 w-3 h-3 border border-[#d4b783]/50 rounded-full flex items-center justify-center bg-black"><div class="w-1 h-1 bg-[#d4b783] rounded-full"></div></div>
+                        <div class="absolute top-1/2 -right-1.5 w-3 h-3 border border-[#d4b783]/50 rounded-full flex items-center justify-center bg-black"><div class="w-1 h-1 bg-[#d4b783] rounded-full"></div></div>
+                    </div>
+                    <div class="absolute inset-16 rounded-full border border-dashed border-[#d4b783]/30 animate-[spin_60s_linear_infinite]"></div>
+
+                    <div class="absolute inset-0 flex flex-col items-center justify-center bg-[radial-gradient(circle_at_center,_rgba(212,183,131,0.05)_0%,_transparent_60%)]">
+                        <p class="text-[8px] tracking-[0.5em] uppercase mb-4 opacity-50 font-sans">Probability Engine</p>
+                        <h2 class="text-5xl md:text-6xl font-black uppercase tracking-tighter italic text-center leading-none text-white drop-shadow-[0_0_15px_rgba(212,183,131,0.3)]">
+                            Wheel<br><span class="text-[#d4b783] text-4xl">of Fate</span>
+                        </h2>
+                        <i data-lucide="eye" class="w-6 h-6 mt-6 opacity-30 text-[#d4b783]"></i>
+                    </div>
                 </div>
-                <p class="text-[9px] text-neutral-500 mt-4 font-mono">* Format: [{"name":"Item", "rarity":5, "chance":10}, ...]</p>
             </div>
+
+            <div class="relative z-30 pb-12 px-8 flex flex-col items-center">
+                <div class="flex items-center gap-12 max-w-2xl w-full justify-center">
+                    <button onclick="pullGacha(1)" id="btn-pull-1" class="group flex flex-col items-center gap-3 transition-all hover:-translate-y-1">
+                        <div class="text-[9px] tracking-widest opacity-50 uppercase font-sans flex items-center gap-2">
+                            <span class="border border-white/20 px-1.5 rounded">L1</span> Single Ritual
+                        </div>
+                        <div class="w-40 py-3 bg-black/60 border border-[#d4b783]/30 rounded-full flex justify-center items-center gap-2 group-hover:border-[#d4b783] group-hover:bg-[#d4b783]/10 transition-all">
+                            <span class="font-black text-sm uppercase tracking-widest">1 Summon</span>
+                        </div>
+                        <div class="text-[10px] text-neutral-400 font-mono">-10 Coins</div>
+                    </button>
+
+                    <div class="w-px h-16 bg-gradient-to-b from-transparent via-[#d4b783]/20 to-transparent"></div>
+
+                    <button onclick="pullGacha(10)" id="btn-pull-10" class="group flex flex-col items-center gap-3 transition-all hover:-translate-y-1">
+                        <div class="text-[9px] tracking-widest opacity-50 uppercase font-sans flex items-center gap-2">
+                            Deca Ritual <span class="border border-white/20 px-1.5 rounded">R1</span>
+                        </div>
+                        <div class="w-40 py-3 bg-[#d4b783]/10 border border-[#d4b783] rounded-full flex justify-center items-center gap-2 group-hover:bg-[#d4b783] group-hover:text-black transition-all shadow-[0_0_20px_rgba(212,183,131,0.2)]">
+                            <span class="font-black text-sm uppercase tracking-widest text-[#d4b783] group-hover:text-black">10 Summon</span>
+                        </div>
+                        <div class="text-[10px] text-neutral-400 font-mono">-100 Coins</div>
+                    </button>
+                </div>
+            </div>
+
+            <div id="gacha-result-area" class="hidden absolute inset-0 z-[150] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 transition-opacity duration-500">
+                <div id="gacha-result-content" class="w-full h-full flex flex-col items-center justify-center"></div>
+                <button onclick="closeGachaResult()" class="absolute bottom-10 z-[200] px-8 py-3 bg-black border border-[#d4b783]/50 rounded-full text-xs text-[#d4b783] uppercase tracking-widest hover:bg-[#d4b783] hover:text-black transition-all font-bold font-sans shadow-[0_0_20px_rgba(0,0,0,1)]">
+                    Confirm & Return
+                </button>
+            </div>
+            
         </div>
+
+        <style>
+            /* 카드가 한 장씩 위로 떠오르는 애니메이션 */
+            @keyframes cardReveal {
+                0% { opacity: 0; transform: translateY(40px) scale(0.9); }
+                100% { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            .animate-card-reveal {
+                animation: cardReveal 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            }
+        </style>
     `;
     if (typeof lucide !== 'undefined') lucide.createIcons();
-    
-    // 최근 뽑기 기록 로드
-    loadRecentGachaHistory();
 };
 
-// 가챠 실행 (로직)
 window.pullGacha = async (times) => {
-    // 코인 체크
+    if (isSpinning) return; 
+
     const cost = times * 10;
     const currentCoins = state.userAccount.coins || 0;
     
     if (currentCoins < cost) {
-        showToast(`Not enough coins! Need ${cost} coins.`);
+        showToast("Insufficient Assets.");
         return;
     }
     
+    isSpinning = true;
+
     // 코인 차감
     try {
         await syncUserCoins(state.user.uid, state.userAccount.loginId, currentCoins - cost);
-        showToast(`-${cost} coins`);
     } catch(e) {
-        console.error(e);
-        showToast("Payment failed!");
-        return;
+        isSpinning = false;
+        return showToast("Transaction Failed.");
     }
     
+    document.getElementById('btn-pull-1').style.opacity = '0.3';
+    document.getElementById('btn-pull-10').style.opacity = '0.3';
+
+    // 바퀴 회전 연출 (플래시 없이 바퀴만 황금빛으로 가속)
+    const wheel = document.getElementById('mystic-wheel');
+    wheel.style.transform = 'scale(1.1) rotate(1080deg)';
+    wheel.style.filter = 'drop-shadow(0 0 50px rgba(212,183,131,0.8)) brightness(1.5)';
+    
+    if (navigator.vibrate) navigator.vibrate([50, 100, 50, 100, 200]);
+
+    // 결과 미리 계산
     const results = [];
     for(let i=0; i<times; i++) {
         const rand = Math.random() * 100;
         let cumulative = 0;
-        let picked = gachaPool[gachaPool.length-1]; // 기본값 (가장 낮은 등급)
+        let picked = gachaPool[gachaPool.length-1];
         
         for(const item of gachaPool) {
             cumulative += parseFloat(item.chance);
-            if(rand <= cumulative) {
-                picked = item;
-                break;
-            }
+            if(rand <= cumulative) { picked = item; break; }
         }
         results.push(picked);
     }
-    showGachaResults(results);
+
+    // 1.5초 후 바퀴가 멈추며 결과창으로 부드럽게 전환
+    setTimeout(() => {
+        showGachaResults(results);
+        
+        wheel.style.transform = 'scale(1) rotate(0deg)';
+        wheel.style.filter = 'none';
+        document.getElementById('btn-pull-1').style.opacity = '1';
+        document.getElementById('btn-pull-10').style.opacity = '1';
+        isSpinning = false;
+    }, 1500);
 };
 
-// 결과 연출 화면
-function showGachaResults(results) {
+// 💡 전역 변수로 타이머 배열 추가 (애니메이션 중간에 닫을 때를 대비)
+window.gachaAnimationTimers = [];
+
+window.showGachaResults = (results) => {
     const resultArea = document.getElementById('gacha-result-area');
     const content = document.getElementById('gacha-result-content');
     
-    // 인벤토리에 아이템 추가
-    addItemsToInventory(results);
+    if(typeof addItemsToInventory === 'function') addItemsToInventory(results);
     
-    // 아이템 HTML 생성
-    const itemsHtml = results.map((item, idx) => {
-        // 등급별 색상
-        const colorClass = item.rarity >= 5 ? 'text-amber-400 border-amber-500/50 bg-amber-900/40 shadow-[0_0_30px_rgba(245,158,11,0.4)]' : 
-                           (item.rarity === 4 ? 'text-purple-400 border-purple-500/50 bg-purple-900/40' : 'text-neutral-400 border-white/10 bg-white/5');
-        
-        // 등장 딜레이 (순차적 등장)
-        const delay = idx * 0.1;
+    const hasHighestRarity = results.some(r => r.rarity >= 5);
 
-        return `
-            <div class="w-32 h-40 ${colorClass} border-2 rounded-xl flex flex-col items-center justify-center p-3 m-2" style="animation: slideUp 0.5s ease-out ${delay}s both;">
-                <span class="text-4xl mb-2 filter drop-shadow-md">${item.rarity >= 5 ? '👑' : (item.rarity === 4 ? '✨' : '📦')}</span>
-                <p class="text-xs font-bold uppercase leading-tight text-center break-words w-full px-1">${item.name}</p>
-                <div class="mt-2 text-[10px] opacity-70 font-mono tracking-widest">${"★".repeat(item.rarity)}</div>
-            </div>
-        `;
-    }).join('');
-
+    // 1. 결과창 기본 틀 먼저 렌더링 (카드가 들어갈 빈 공간 설정)
     content.innerHTML = `
-        <h3 class="text-4xl font-black text-white uppercase italic mb-10 drop-shadow-lg tracking-tighter">Acquired Items</h3>
-        <div class="flex flex-wrap justify-center max-w-4xl gap-2">
-            ${itemsHtml}
+        <div class="text-center mb-8 w-full animate-fade-in">
+            <p class="text-[10px] font-sans text-amber-500 uppercase tracking-[0.5em] mb-2 ${hasHighestRarity ? 'animate-pulse' : ''}">
+                ${hasHighestRarity ? 'Anomaly Detected' : 'Extraction Complete'}
+            </p>
+            <h3 class="text-4xl md:text-5xl font-black text-white uppercase italic tracking-tighter drop-shadow-lg">
+                Manifest
+            </h3>
         </div>
+        <div id="gacha-cards-container" class="flex flex-wrap justify-center max-w-5xl gap-y-4"></div>
     `;
 
     resultArea.classList.remove('hidden');
-    // 팝업 애니메이션
-    setTimeout(() => {
-        content.classList.remove('scale-0');
-        content.classList.add('scale-100');
-    }, 50);
-}
 
+    const container = document.getElementById('gacha-cards-container');
+    window.gachaAnimationTimers = []; // 타이머 초기화
+
+    // 2. 카드를 0.3초(300ms) 간격으로 하나씩 DOM에 추가
+    results.forEach((item, idx) => {
+        const timerId = setTimeout(() => {
+            let frameClass, textClass, stars;
+            if (item.rarity >= 5) {
+                frameClass = 'border-[#d4b783] shadow-[0_0_30px_rgba(212,183,131,0.4)] bg-gradient-to-b from-[#d4b783]/10 to-black';
+                textClass = 'text-[#d4b783]';
+                stars = '<span class="text-[#d4b783] animate-pulse">✦✦✦✦✦</span>';
+            } else if (item.rarity === 4) {
+                frameClass = 'border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.2)] bg-gradient-to-b from-purple-900/20 to-black';
+                textClass = 'text-purple-400';
+                stars = '<span class="text-purple-400">✦✦✦✦</span>';
+            } else {
+                frameClass = 'border-white/20 bg-[#111]';
+                textClass = 'text-white';
+                stars = '<span class="text-neutral-500">✦✦✦</span>';
+            }
+
+            const cardHtml = `
+                <div class="relative w-32 md:w-40 aspect-[2/3] ${frameClass} border-2 rounded-xl flex flex-col items-center justify-center p-4 m-2 overflow-hidden animate-card-reveal opacity-0">
+                    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 mix-blend-overlay"></div>
+                    <div class="absolute top-2 left-2 w-2 h-2 border-l border-t border-current opacity-50 ${textClass}"></div>
+                    <div class="absolute top-2 right-2 w-2 h-2 border-r border-t border-current opacity-50 ${textClass}"></div>
+                    <div class="absolute bottom-2 left-2 w-2 h-2 border-l border-b border-current opacity-50 ${textClass}"></div>
+                    <div class="absolute bottom-2 right-2 w-2 h-2 border-r border-b border-current opacity-50 ${textClass}"></div>
+                    
+                    <span class="text-5xl md:text-6xl mb-4 z-10 filter drop-shadow-xl">${item.icon || '📦'}</span>
+                    
+                    <div class="z-10 text-center w-full mt-auto">
+                        <p class="text-[10px] md:text-xs font-bold uppercase tracking-widest leading-tight line-clamp-2 ${textClass}">${item.name}</p>
+                        <div class="mt-2 text-[8px] tracking-[0.2em] font-sans">${stars}</div>
+                    </div>
+                </div>
+            `;
+            
+            // HTML 끝에 카드 추가
+            container.insertAdjacentHTML('beforeend', cardHtml);
+            
+            // 카드가 나타날 때 작은 진동 (모바일)
+            if (navigator.vibrate) navigator.vibrate(10);
+            
+        }, idx * 300); // 10연차일 경우 3초에 걸쳐 순서대로 등장
+
+        window.gachaAnimationTimers.push(timerId);
+    });
+};
+
+// 💡 닫기 버튼 로직 강화 (완벽한 초기화)
+window.closeGachaResult = () => {
+    // 진행 중인 카드 등장 애니메이션 타이머가 있다면 모두 강제 종료
+    if(window.gachaAnimationTimers && window.gachaAnimationTimers.length > 0) {
+        window.gachaAnimationTimers.forEach(timerId => clearTimeout(timerId));
+    }
+    
+    // UI 숨기기 및 내부 내용물 완벽히 제거
+    const resultArea = document.getElementById('gacha-result-area');
+    resultArea.classList.add('hidden');
+    document.getElementById('gacha-result-content').innerHTML = ''; 
+};
 // 인벤토리에 아이템 추가
 async function addItemsToInventory(items) {
     try {
@@ -5339,70 +5409,119 @@ let isSpinning = false;
 window.renderSlots = () => {
     const contentArea = document.getElementById('content-area');
     contentArea.innerHTML = `
-        <div class="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden animate-fade-in relative h-full">
-            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
-            <div class="absolute inset-0 bg-gradient-to-br from-green-900/20 via-black to-yellow-900/20 pointer-events-none"></div>
+        <div class="flex-1 flex flex-col bg-[#121212] overflow-hidden animate-fade-in relative h-full font-serif text-[#d4b783] items-center justify-center py-10">
+            
+            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10 pointer-events-none mix-blend-overlay"></div>
+            
+            <button onclick="openMiniGameHub()" class="absolute top-8 left-10 flex items-center gap-2 text-neutral-500 hover:text-[#d4b783] transition-colors z-50 text-xs font-bold uppercase tracking-widest font-sans">
+                <i data-lucide="arrow-left" class="w-4 h-4"></i> Back to Hub
+            </button>
 
-            <div class="p-8 border-b border-white/5 flex justify-between items-center bg-black/40 backdrop-blur-xl z-20">
-                <div>
-                    <h2 class="text-3xl font-black text-green-400 uppercase italic tracking-tighter">Lucky 777</h2>
-                    <p class="text-[10px] text-neutral-500 uppercase tracking-widest mt-1">Slot Machine Protocol</p>
-                </div>
-                <button onclick="openMiniGameHub()" class="px-4 py-2 border border-white/10 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all">EXIT</button>
-            </div>
-
-            <div class="flex-1 flex flex-col items-center justify-center relative overflow-hidden p-10">
-                <!-- 슬롯 머신 -->
-                <div class="relative bg-neutral-900 border-4 border-green-900/50 rounded-3xl p-12 shadow-[0_0_100px_rgba(34,197,94,0.3)] backdrop-blur-md">
-                    <!-- 상단 장식 -->
-                    <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-amber-500 text-black font-black text-xs px-6 py-2 rounded-full shadow-xl">
-                        LUCKY 777
-                    </div>
-                    
-                    <!-- 슬롯 디스플레이 -->
-                    <div class="flex gap-4 mb-8">
-                        <div id="slot-1" class="w-24 h-32 bg-black border-2 border-green-500/50 rounded-xl flex items-center justify-center text-6xl shadow-inner">
-                            🍒
-                        </div>
-                        <div id="slot-2" class="w-24 h-32 bg-black border-2 border-green-500/50 rounded-xl flex items-center justify-center text-6xl shadow-inner">
-                            🍒
-                        </div>
-                        <div id="slot-3" class="w-24 h-32 bg-black border-2 border-green-500/50 rounded-xl flex items-center justify-center text-6xl shadow-inner">
-                            🍒
-                        </div>
-                    </div>
-                    
-                    <!-- 결과 표시 -->
-                    <div id="slot-result" class="h-12 mb-6 flex items-center justify-center">
-                        <p class="text-sm text-neutral-500 font-mono">Ready to spin!</p>
-                    </div>
-                    
-                    <!-- 스핀 버튼 -->
-                    <button onclick="spinSlots()" id="spin-button" class="w-full py-6 bg-gradient-to-b from-green-500 to-green-700 hover:from-green-400 hover:to-green-600 text-white font-black text-xl uppercase rounded-xl shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
-                        🎰 SPIN (10 Coins)
-                    </button>
-                </div>
+            <div id="slot-machine-body" class="relative w-full max-w-md bg-[#1a1a1a] rounded-[2rem] overflow-hidden border border-[#d4b783]/20 shadow-[0_30px_60px_rgba(0,0,0,0.8)] flex flex-col transition-all">
                 
-                <!-- 페이테이블 -->
-                <div class="mt-12 bg-black/50 border border-white/5 rounded-xl p-6 backdrop-blur-md max-w-md">
-                    <h4 class="text-xs font-bold text-white uppercase mb-4 tracking-widest border-b border-white/10 pb-2">Paytable</h4>
-                    <ul class="text-[10px] text-neutral-400 space-y-2 font-mono">
-                        <li class="flex justify-between">
-                            <span>💎 💎 💎</span> <span class="text-yellow-500 font-bold">3x (30 Coins)</span>
-                        </li>
-                        <li class="flex justify-between">
-                            <span>7️⃣ 7️⃣ 7️⃣</span> <span class="text-amber-500 font-bold">2x (20 Coins)</span>
-                        </li>
-                        <li class="flex justify-between">
-                            <span>🍊 🍊 🍊 / 🍋 🍋 🍋 / 🍒 🍒 🍒</span> <span class="text-green-500 font-bold">1x (10 Coins)</span>
-                        </li>
-                        <li class="flex justify-between">
-                            <span>Any other</span> <span class="text-red-500">0x (Lose)</span>
-                        </li>
-                    </ul>
+                <div class="absolute top-8 left-8 w-5 h-5 bg-[#121212] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)] border border-[#d4b783]/10"></div>
+                <div class="absolute top-8 right-8 w-5 h-5 bg-[#121212] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)] border border-[#d4b783]/10"></div>
+
+                <div class="pt-16 pb-10 px-12 text-center bg-gradient-to-b from-[#111] to-[#1a1a1a]">
+                    <div class="flex justify-between items-center text-[10px] uppercase tracking-[0.3em] opacity-40 mb-6 font-sans">
+                        <span>No. 777</span>
+                        <span>1452</span>
+                    </div>
+                    <p class="text-[9px] tracking-[0.4em] opacity-60 uppercase mb-2 font-sans">Probability Experiment</p>
+                    <h2 class="text-6xl font-black uppercase tracking-tighter text-[#d4b783] leading-none mb-2 drop-shadow-[0_0_15px_rgba(212,183,131,0.2)]">
+                        Lucky<br>777
+                    </h2>
+                </div>
+
+                <div class="px-10 py-10 bg-black/60 border-y border-[#d4b783]/10 flex justify-center gap-4 relative shadow-inner">
+                    <div id="slot-1" class="w-24 h-32 bg-[#121212] border border-[#d4b783]/20 rounded-xl flex items-center justify-center text-6xl shadow-[inset_0_5px_20px_rgba(0,0,0,1)] transition-transform">🍒</div>
+                    <div id="slot-2" class="w-24 h-32 bg-[#121212] border border-[#d4b783]/20 rounded-xl flex items-center justify-center text-6xl shadow-[inset_0_5px_20px_rgba(0,0,0,1)] transition-transform">🍒</div>
+                    <div id="slot-3" class="w-24 h-32 bg-[#121212] border border-[#d4b783]/20 rounded-xl flex items-center justify-center text-6xl shadow-[inset_0_5px_20px_rgba(0,0,0,1)] transition-transform">🍒</div>
+                </div>
+
+                <div class="relative w-full h-0 flex items-center justify-between z-20">
+                    <div class="w-4 h-8 bg-[#121212] rounded-r-full absolute left-0 border-r border-y border-[#d4b783]/20 -ml-[1px]"></div>
+                    <div class="w-full border-t-2 border-dashed border-[#d4b783]/20 mx-6"></div>
+                    <div class="w-4 h-8 bg-[#121212] rounded-l-full absolute right-0 border-l border-y border-[#d4b783]/20 -mr-[1px]"></div>
+                </div>
+
+                <div class="p-10 flex flex-col items-center bg-[#1a1a1a]">
+                    <div class="w-full grid grid-cols-3 gap-2 text-center mb-8 border-b border-[#d4b783]/10 pb-6 items-end">
+                        <div class="group flex flex-col items-center">
+                            <p class="text-[8px] opacity-40 uppercase tracking-widest mb-3 font-sans">Common</p>
+                            <div class="flex flex-col gap-1 text-[9px] mb-3 opacity-60 tracking-widest">
+                                <span>🍒 🍒 🍒</span>
+                                <span>🍋 🍋 🍋</span>
+                            </div>
+                            <p class="text-xl font-mono text-white">x 2</p>
+                        </div>
+                        <div class="group flex flex-col items-center">
+                            <p class="text-[8px] opacity-40 uppercase tracking-widest mb-3 font-sans">Lucky</p>
+                            <div class="text-[10px] mb-3 opacity-60 tracking-widest mt-auto">7️⃣ 7️⃣ 7️⃣</div>
+                            <p class="text-xl font-mono text-[#d4b783]">x 5</p>
+                        </div>
+                        <div class="group flex flex-col items-center">
+                            <p class="text-[8px] opacity-40 uppercase tracking-widest mb-3 font-sans">Royal</p>
+                            <div class="text-[10px] mb-3 opacity-60 tracking-widest mt-auto">💎 💎 💎</div>
+                            <p class="text-xl font-mono text-amber-400">x 10</p>
+                        </div>
+                    </div>
+
+                    <div id="slot-result" class="h-8 mb-6 flex flex-col items-center justify-center w-full">
+                        <p class="text-xs text-neutral-500 italic">Insert 10 coins to validate ticket.</p>
+                    </div>
+
+                    <button onclick="spinSlots()" id="spin-button" class="w-full py-5 bg-transparent border border-[#d4b783]/50 text-[#d4b783] hover:bg-[#d4b783] hover:text-black font-black text-sm uppercase tracking-[0.3em] rounded-xl transition-all duration-300 disabled:opacity-30 flex items-center justify-center gap-3 font-sans">
+                        <span class="w-2 h-2 rounded-full bg-current"></span>
+                        Validate Ticket
+                        <span class="w-2 h-2 rounded-full bg-current"></span>
+                    </button>
+
+                    <div class="mt-10 w-full flex flex-col items-center opacity-30">
+                        <div class="flex items-center justify-between w-full mb-2">
+                            <div class="w-2 h-2 rounded-full bg-[#d4b783]"></div>
+                            <span class="text-[7px] tracking-[0.4em] uppercase font-sans">Foundation Asset</span>
+                        </div>
+                        <div class="flex h-8 w-full justify-between items-end gap-[2px]">
+                            ${Array.from({length: 40}).map(() => `<div class="bg-[#d4b783] h-full" style="width: ${Math.random() * 4 + 1}px; opacity: ${Math.random() * 0.5 + 0.5}; height: ${Math.random() > 0.8 ? '120%' : '100%'}"></div>`).join('')}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
+        <style>
+            @keyframes slot-blur-bounce {
+                0% { filter: blur(0px); transform: translateY(0); }
+                50% { filter: blur(3px); transform: translateY(15px); }
+                100% { filter: blur(0px); transform: translateY(0); }
+            }
+            .slot-spinning { animation: slot-blur-bounce 0.15s infinite linear; }
+            .slot-winner { box-shadow: inset 0 0 40px rgba(212, 183, 131, 0.6); border-color: #d4b783 !important; transform: scale(1.08) !important; background: rgba(212, 183, 131, 0.1); }
+            
+            /* 💡 당첨 파티클(코인) 애니메이션 */
+            @keyframes coin-fall {
+                0% { transform: translateY(-5vh) rotate(0deg) scale(1); opacity: 1; }
+                100% { transform: translateY(110vh) rotate(720deg) scale(0.6); opacity: 0; }
+            }
+            .particle-coin {
+                position: fixed;
+                top: -20px;
+                border-radius: 50%;
+                z-index: 9999;
+                pointer-events: none;
+                animation: coin-fall linear forwards;
+            }
+            
+            /* 💡 화면 진동 애니메이션 */
+            @keyframes ticket-shake {
+                0%, 100% { transform: translateX(0) rotate(0); }
+                20% { transform: translateX(-5px) rotate(-1deg); }
+                40% { transform: translateX(5px) rotate(1deg); }
+                60% { transform: translateX(-5px) rotate(-1deg); }
+                80% { transform: translateX(5px) rotate(1deg); }
+            }
+            .animate-shake { animation: ticket-shake 0.4s ease-in-out; }
+        </style>
     `;
     if (typeof lucide !== 'undefined') lucide.createIcons();
 };
@@ -5411,95 +5530,204 @@ window.renderSlots = () => {
 window.spinSlots = async () => {
     if (isSpinning) return;
     
-    // 코인 체크
+    // ==========================================
+    // 🎵 레트로 사운드 이펙트 생성기 (Web Audio API)
+    // ==========================================
+    const playSFX = (type) => {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ac = new AudioContext();
+            
+            const playTone = (freq, wave, time, vol, delay = 0) => {
+                setTimeout(() => {
+                    const osc = ac.createOscillator();
+                    const gain = ac.createGain();
+                    osc.type = wave;
+                    osc.frequency.setValueAtTime(freq, ac.currentTime);
+                    gain.gain.setValueAtTime(vol, ac.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + time);
+                    osc.connect(gain);
+                    gain.connect(ac.destination);
+                    osc.start();
+                    osc.stop(ac.currentTime + time);
+                }, delay);
+            };
+
+            if (type === 'start') playTone(600, 'sine', 0.2, 0.1, 0);       // 시작음
+            if (type === 'stop') playTone(200, 'square', 0.1, 0.05, 0);     // 멈춤음 (철컥)
+            if (type === 'win_common') {                                    // 2배 당첨 (차라랑)
+                playTone(523.25, 'sine', 0.3, 0.1, 0);
+                playTone(659.25, 'sine', 0.4, 0.1, 100);
+            }
+            if (type === 'win_lucky') {                                     // 5배 당첨 (빰-빰-빠밤!)
+                [0, 150, 300].forEach((d, i) => playTone(523.25 + (i*100), 'square', 0.2, 0.1, d));
+                playTone(880, 'square', 0.6, 0.1, 450);
+            }
+            if (type === 'win_royal') {                                     // 10배 당첨 (아주 화려하게)
+                [0, 100, 200, 300, 400].forEach((d, i) => playTone(440 + (i*150), 'sine', 0.3, 0.1, d));
+                playTone(1046.50, 'square', 1.0, 0.15, 500);
+                playTone(1318.51, 'square', 1.5, 0.15, 650);
+            }
+            if (type === 'lose') {                                          // 꽝 (둔탁한 삐빅)
+                playTone(150, 'sawtooth', 0.3, 0.1, 0);
+                playTone(100, 'sawtooth', 0.4, 0.1, 150);
+            }
+        } catch(e) {} // 브라우저 정책 등으로 소리 재생 불가 시 무시
+    };
+
+    // ==========================================
+    // ✨ 당첨 코인 파티클 생성기
+    // ==========================================
+    const spawnCoins = (multiplier) => {
+        const ticket = document.getElementById('slot-machine-body');
+        if(ticket) ticket.classList.add('animate-shake'); // 기계 진동
+        setTimeout(() => ticket?.classList.remove('animate-shake'), 500);
+
+        const count = multiplier === 10 ? 80 : (multiplier === 5 ? 40 : 15);
+        const colors = ['#d4b783', '#f59e0b', '#fbbf24', '#ffffff']; // 빈티지 골드 계열
+
+        for (let i = 0; i < count; i++) {
+            const coin = document.createElement('div');
+            coin.className = 'particle-coin';
+            
+            // 크기, 위치, 속도 랜덤 설정
+            const size = Math.random() * 10 + 10; // 10px ~ 20px
+            coin.style.width = `${size}px`;
+            coin.style.height = `${size}px`;
+            coin.style.left = `${Math.random() * 100}vw`;
+            coin.style.animationDuration = `${Math.random() * 1.5 + 1.5}s`;
+            coin.style.animationDelay = `${Math.random() * 0.5}s`;
+            
+            // 색상과 디자인 (테두리 있는 동전 느낌)
+            coin.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            coin.style.border = '2px solid rgba(255,255,255,0.5)';
+            coin.style.boxShadow = `0 0 ${Math.random() * 10 + 5}px rgba(212, 183, 131, 0.8)`;
+            
+            document.body.appendChild(coin);
+            
+            // 애니메이션 끝나면 DOM에서 제거 (메모리 관리)
+            setTimeout(() => coin.remove(), 3500);
+        }
+    };
+
+    // ==========================================
+    // 메인 슬롯 로직 시작
+    // ==========================================
     const cost = 10;
     const currentCoins = state.userAccount.coins || 0;
     
     if (currentCoins < cost) {
-        showToast("Not enough coins! Need 10 coins.");
+        showToast("Insufficient coins. Ticket rejected.");
         return;
     }
     
-    // 코인 차감
     try {
         await syncUserCoins(state.user.uid, state.userAccount.loginId, currentCoins - cost);
-        showToast("-10 coins");
-    } catch(e) {
-        console.error(e);
-        showToast("Payment failed!");
-        return;
-    }
+    } catch(e) { return; }
     
     isSpinning = true;
+    playSFX('start'); // 레버 당기는 소리
+    
     const spinButton = document.getElementById('spin-button');
     const resultDiv = document.getElementById('slot-result');
+    const slots = [document.getElementById('slot-1'), document.getElementById('slot-2'), document.getElementById('slot-3')];
+    
     spinButton.disabled = true;
-    resultDiv.innerHTML = '<p class="text-sm text-yellow-500 font-mono animate-pulse">Spinning...</p>';
+    spinButton.innerHTML = "Processing...";
+    resultDiv.innerHTML = '<p class="text-xs text-[#d4b783] uppercase tracking-widest animate-pulse font-sans">Calculating Fate...</p>';
     
-    // 슬롯 애니메이션 (순차적으로 멈춤)
-    const slots = [
-        document.getElementById('slot-1'),
-        document.getElementById('slot-2'),
-        document.getElementById('slot-3')
-    ];
+    slots.forEach(slot => slot.classList.remove('slot-winner'));
+
+    // 확률 결정 (2배: 40%, 5배: 5%, 10배: 1.5%)
+    const rng = Math.random() * 100; 
+    let targetOutcome = 'LOSE';
     
-    const results = [];
+    if (rng < 1.5) targetOutcome = 'ROYAL';       
+    else if (rng < 6.5) targetOutcome = 'LUCKY';  
+    else if (rng < 46.5) targetOutcome = 'COMMON';
     
-    for (let i = 0; i < 3; i++) {
-        // 슬롯 회전 애니메이션
-        let spinCount = 0;
-        const spinInterval = setInterval(() => {
-            slots[i].textContent = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
-            spinCount++;
-            if (spinCount > 20 + i * 10) {
-                clearInterval(spinInterval);
-            }
-        }, 100);
-        
-        // 결과 결정 (대기 후)
-        await new Promise(resolve => setTimeout(resolve, 2000 + i * 500));
-        
-        // 최종 결과
-        const result = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
-        slots[i].textContent = result;
-        results.push(result);
-    }
-    
-    // 결과 판정
-    let winAmount = 0;
-    let message = "";
-    
-    if (results[0] === '💎' && results[1] === '💎' && results[2] === '💎') {
-        winAmount = 30;
-        message = '<p class="text-2xl font-black text-yellow-500 animate-bounce">💎 JACKPOT! +30 COINS! 💎</p>';
-    } else if (results[0] === '7️⃣' && results[1] === '7️⃣' && results[2] === '7️⃣') {
-        winAmount = 20;
-        message = '<p class="text-xl font-black text-amber-500">🎉 LUCKY 777! +20 COINS! 🎉</p>';
-    } else if (results[0] === results[1] && results[1] === results[2]) {
-        winAmount = 10;
-        message = '<p class="text-lg font-bold text-green-500">✨ MATCH! +10 COINS! ✨</p>';
+    const finalResults = [];
+    const fruits = ['🍒', '🍋', '🍊'];
+    const allSymbols = ['🍒', '🍋', '🍊', '7️⃣', '💎'];
+
+    if (targetOutcome === 'ROYAL') {
+        finalResults.push('💎', '💎', '💎');
+    } else if (targetOutcome === 'LUCKY') {
+        finalResults.push('7️⃣', '7️⃣', '7️⃣');
+    } else if (targetOutcome === 'COMMON') {
+        const f = fruits[Math.floor(Math.random() * fruits.length)];
+        finalResults.push(f, f, f);
     } else {
-        message = '<p class="text-sm text-red-500 font-mono">😢 No match... Try again!</p>';
+        finalResults.push(allSymbols[Math.floor(Math.random() * allSymbols.length)]);
+        finalResults.push(allSymbols[Math.floor(Math.random() * allSymbols.length)]);
+        let lastSymbol = allSymbols[Math.floor(Math.random() * allSymbols.length)];
+        if (finalResults[0] === finalResults[1] && finalResults[1] === lastSymbol) {
+            lastSymbol = allSymbols.find(s => s !== lastSymbol);
+        }
+        finalResults.push(lastSymbol);
     }
-    
-    // 결과 표시
-    resultDiv.innerHTML = message;
+
+    slots.forEach(slot => slot.classList.add('slot-spinning'));
+
+    // 슬롯 멈춤 애니메이션 및 효과음 재생
+    for (let i = 0; i < 3; i++) {
+        await new Promise(resolve => setTimeout(resolve, 800 + (i * 600)));
+        
+        slots[i].classList.remove('slot-spinning');
+        slots[i].textContent = finalResults[i]; 
+        
+        playSFX('stop'); // 각 슬롯이 멈출 때 철컥 소리
+        if (navigator.vibrate) navigator.vibrate(10);
+    }
+
+    // 결과 판정 및 이펙트 호출
+    let winMultiplier = 0;
+    let winMessage = "";
+
+    if (targetOutcome === 'ROYAL') {
+        winMultiplier = 10;
+        winMessage = '<span class="text-amber-400 font-bold uppercase tracking-[0.2em] font-sans drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] animate-pulse">Royal Fortune! x10</span>';
+        slots.forEach(s => s.classList.add('slot-winner'));
+        playSFX('win_royal');
+        spawnCoins(10); // 코인 비 쏟아짐 (대)
+    } else if (targetOutcome === 'LUCKY') {
+        winMultiplier = 5;
+        winMessage = '<span class="text-[#d4b783] font-bold uppercase tracking-[0.2em] font-sans drop-shadow-[0_0_5px_rgba(212,183,131,0.5)]">Lucky Protocol! x5</span>';
+        slots.forEach(s => s.classList.add('slot-winner'));
+        playSFX('win_lucky');
+        spawnCoins(5); // 코인 비 쏟아짐 (중)
+    } else if (targetOutcome === 'COMMON') {
+        winMultiplier = 2;
+        winMessage = '<span class="text-white font-bold uppercase tracking-[0.2em] font-sans drop-shadow-[0_0_3px_rgba(255,255,255,0.5)]">Common Yield! x2</span>';
+        slots.forEach(s => s.classList.add('slot-winner'));
+        playSFX('win_common');
+        spawnCoins(2); // 코인 비 쏟아짐 (소)
+    } else {
+        winMessage = '<span class="text-neutral-500 italic text-xs">Void result. Try again.</span>';
+        playSFX('lose'); // 꽝 효과음
+    }
+
+    resultDiv.innerHTML = winMessage;
     
     // 상금 지급
-    if (winAmount > 0) {
-        try {
-            const newTotal = state.userAccount.coins + winAmount;
-            await syncUserCoins(state.user.uid, state.userAccount.loginId, newTotal);
-            showToast(`+${winAmount} coins!`);
-        } catch(e) {
-            console.error(e);
-        }
+    if (winMultiplier > 0) {
+        const prize = cost * winMultiplier;
+        const newTotal = (state.userAccount.coins || 0) + prize;
+        await syncUserCoins(state.user.uid, state.userAccount.loginId, newTotal);
+        showToast(`Reward Acquired: +${prize} Coins`);
     }
-    
-    isSpinning = false;
-    spinButton.disabled = false;
-};
 
+    setTimeout(() => {
+        isSpinning = false;
+        spinButton.disabled = false;
+        spinButton.innerHTML = `
+            <span class="w-2 h-2 rounded-full bg-current"></span>
+            Validate Ticket
+            <span class="w-2 h-2 rounded-full bg-current"></span>
+        `;
+    }, 1000);
+};
 /* -----------------------------------------
    5. Story Timeline (기존 코드)
    ----------------------------------------- */
